@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --gold: #c9a84c;
+  --gold-dim: #8a6e2f;
+  --gold-glow: rgba(201,168,76,0.12);
+  --panel: #161616;
+  --border: rgba(255,255,255,0.07);
+  --border-bright: rgba(255,255,255,0.14);
+  --muted: #6b6560;
+  --text: #e8e4dc;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: #0a0a0a;
+  color: var(--text);
+  font-family: var(--font-dm-sans), sans-serif;
+}
+
+/* Subtle grid texture */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.013) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.013) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #111; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gold-dim); }
+
+/* Input resets */
+input, select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border-bright);
+  border-radius: 4px;
+  padding: 0 12px;
+  height: 38px;
+  font-size: 13px;
+  font-family: var(--font-dm-sans), sans-serif;
+  outline: none;
+  transition: border-color .15s;
+}
+input:focus, select:focus { border-color: var(--gold); }
+input::placeholder { color: var(--muted); }
+select option { background: #161616; }
+
+.gold-pulse {
+  animation: goldPulse 2s infinite;
+}
+@keyframes goldPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
