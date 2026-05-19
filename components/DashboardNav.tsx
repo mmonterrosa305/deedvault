@@ -33,12 +33,6 @@ export default function DashboardNav({ email }: { email: string }) {
         <span className="font-display text-lg tracking-widest">
           DEED<span style={{ color: 'var(--gold)' }}>VAULT</span>
         </span>
-        <span
-          className="font-mono text-xs tracking-widest ml-3 px-2 py-0.5 rounded"
-          style={{ background: 'var(--gold-glow)', color: 'var(--gold)', border: '1px solid rgba(201,168,76,0.2)' }}
-        >
-          DASHBOARD
-        </span>
       </div>
 
       {/* Right side */}

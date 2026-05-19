@@ -57,10 +57,54 @@ input:focus, select:focus { border-color: var(--gold); }
 input::placeholder { color: var(--muted); }
 select option { background: #161616; }
 
+textarea {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border-bright);
+  border-radius: 4px;
+  font-family: var(--font-dm-sans), sans-serif;
+  outline: none;
+}
+textarea:focus { border-color: var(--gold); }
+
+input.vault-range,
+input[type='range'].vault-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  padding: 0;
+  background: #333;
+  border: none;
+  border-radius: 2px;
+}
+input.vault-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--gold);
+  cursor: pointer;
+}
+input.vault-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
 .gold-pulse {
   animation: goldPulse 2s infinite;
 }
 @keyframes goldPulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
+}
+
+@keyframes modalSlideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes modalOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

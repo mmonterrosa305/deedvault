@@ -1,0 +1,58 @@
+'use client'
+
+import { useDashboard, type TabId } from '@/context/DashboardContext'
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'search', label: 'Search' },
+  { id: 'saved', label: 'Saved Properties' },
+  { id: 'alerts', label: 'Alerts' },
+  { id: 'agent', label: 'Agent' },
+  { id: 'settings', label: 'Settings' },
+]
+
+export default function DashboardTabNav() {
+  const { activeTab, setActiveTab, saved, alerts } = useDashboard()
+
+  return (
+    <div
+      className="sticky top-14 z-40 border-b overflow-x-auto"
+      style={{ background: 'rgba(10,10,10,0.97)', borderColor: 'var(--border)', backdropFilter: 'blur(12px)' }}
+    >
+      <div className="flex gap-1 px-4 min-w-max">
+        {TABS.map(tab => {
+          const active = activeTab === tab.id
+          const badge =
+            tab.id === 'saved' && saved.length > 0
+              ? saved.length
+              : tab.id === 'alerts' && alerts.filter(a => a.enabled).length > 0
+                ? alerts.filter(a => a.enabled).length
+                : null
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className="font-mono text-xs tracking-widest px-4 py-3 transition-all whitespace-nowrap flex items-center gap-2"
+              style={{
+                color: active ? 'var(--gold)' : 'var(--muted)',
+                borderBottom: active ? '2px solid var(--gold)' : '2px solid transparent',
+                background: 'transparent',
+                cursor: 'pointer',
+              }}
+            >
+              {tab.label.toUpperCase()}
+              {badge != null && (
+                <span
+                  className="px-1.5 py-0.5 rounded text-[10px]"
+                  style={{ background: 'var(--gold-glow)', color: 'var(--gold)', border: '1px solid rgba(201,168,76,0.25)' }}
+                >
+                  {badge}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
