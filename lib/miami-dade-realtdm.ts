@@ -6,13 +6,41 @@
 export const REALTDM_CASE_LIST_URL = 'https://miamidade.realtdm.com/public/cases/list'
 export const REALTDM_CASE_DETAILS_URL = 'https://miamidade.realtdm.com/public/cases/details'
 
-/** RealTDM filtercasestatus values */
-export const REALTDM_RESALE_STATUS_IDS = ['448', '449'] as const
+/**
+ * RealTDM filtercasestatus values (public case search dropdown IDs).
+ * @see https://miamidade.realtdm.com/public/cases/list
+ */
+export const REALTDM_ACTIVE_STATUS_IDS = [
+  '193', // Active - Applicant Defaulted
+  '194', // Active - Bidder Defaulted
+  '196', // Active - Redemption
+  '198', // Active - Sold
+  '199', // Active - Sold Applicant
+  '200', // Active - Sold Bidder
+  '448', // Active - Resale 30Day (1 Adv)
+  '449', // Active - Resale Full (4 Adv)
+] as const
 
-export const REALTDM_RESALE_STATUS_LABELS = [
+/** @deprecated Use REALTDM_ACTIVE_STATUS_IDS */
+export const REALTDM_RESALE_STATUS_IDS = REALTDM_ACTIVE_STATUS_IDS
+
+export const REALTDM_ACTIVE_STATUS_LABELS = [
+  'ACTIVE - APPLICANT DEFAULTED',
+  'ACTIVE - BIDDER DEFAULTED',
+  'ACTIVE - REDEMPTION',
+  'ACTIVE - SOLD',
+  'ACTIVE - SOLD APPLICANT',
+  'ACTIVE - SOLD BIDDER',
   'ACTIVE - RESALE 30DAY (1 ADV)',
   'ACTIVE - RESALE FULL (4 ADV)',
 ] as const
+
+/** @deprecated Use REALTDM_ACTIVE_STATUS_LABELS */
+export const REALTDM_RESALE_STATUS_LABELS = REALTDM_ACTIVE_STATUS_LABELS
+
+/** Max cases to load opening bid / address from details (avoids multi-minute API calls). */
+const MAX_DETAIL_ENRICHMENT = 120
+const DETAIL_FETCH_CONCURRENCY = 10
 
 export type MiamiDadeCase = {
   caseId: string
@@ -108,20 +136,53 @@ function parseListCases(html: string): Omit<MiamiDadeCase, 'openingBid' | 'prope
   return cases
 }
 
+function cleanPropertyAddress(raw: string): string | null {
+  const text = raw
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/,?\s*FL\s*$/i, '')
+    .replace(/^,\s*/, '')
+    .trim()
+
+  if (!text || /no address/i.test(text)) return null
+
+  const parts = text
+    .split(/[\n,]+/)
+    .map(p => p.trim())
+    .filter(Boolean)
+
+  for (const part of parts) {
+    if (/no address/i.test(part)) continue
+    if (/\d/.test(part) && part.length > 4) return part
+  }
+
+  return parts[0] ?? null
+}
+
+/** Parse property address from RealTDM case details HTML (summary section). */
+function parsePropertyAddress(html: string): string {
+  const patterns = [
+    /<div class="data-label">Property Address<\/div>\s*<div class="data-value[^"]*">([\s\S]*?)<\/div>/gi,
+    /<div class="data-label">Property Address<\/div>\s*<div class="data-value">([\s\S]*?)<\/div>/gi,
+  ]
+
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(html)) !== null) {
+      const addr = cleanPropertyAddress(stripTags(match[1]))
+      if (addr) return addr
+    }
+  }
+
+  return 'Address not available'
+}
+
 function parseDetails(html: string): Pick<MiamiDadeCase, 'openingBid' | 'propertyAddress' | 'saleDate' | 'status'> {
   const openingBidMatch = html.match(
     /<div class="title">Opening Bid<\/div>\s*<div class="value">([^<]+)/i
   )
   const openingBid = openingBidMatch ? parseMoney(openingBidMatch[1]) : null
 
-  const addressMatch = html.match(
-    /<div class="data-label">Property Address<\/div>\s*<div class="data-value[^"]*">([\s\S]*?)<\/div>/i
-  )
-  let propertyAddress = addressMatch ? stripTags(addressMatch[1]) : ''
-  propertyAddress = propertyAddress.replace(/,?\s*FL\s*$/i, '').trim()
-  if (!propertyAddress || /no address/i.test(propertyAddress)) {
-    propertyAddress = 'Address not available'
-  }
+  const propertyAddress = parsePropertyAddress(html)
 
   const saleDateMatch = html.match(
     /<div class="data-label">Sale Date<\/div>\s*<div class="data-value">([^<]+)/i
@@ -134,6 +195,11 @@ function parseDetails(html: string): Pick<MiamiDadeCase, 'openingBid' | 'propert
   const status = statusMatch ? stripTags(statusMatch[1]) : ''
 
   return { openingBid, propertyAddress, saleDate, status }
+}
+
+function parseTotalPages(html: string): number {
+  const match = html.match(/Page\s+\d+\s+of\s+(\d+)/i)
+  return match ? Math.max(1, parseInt(match[1], 10)) : 1
 }
 
 async function realTdmPost(
@@ -170,13 +236,13 @@ async function realTdmPost(
   return { html, cookie: nextCookie }
 }
 
-function buildListSearchBody(perPage = 100): URLSearchParams {
+function buildListSearchBody(page: number, perPage: number): URLSearchParams {
   return new URLSearchParams({
-    filterPageNumber: '1',
+    filterPageNumber: String(page),
     filterFiltered: '1',
     sectionRouteCode: '',
     isPublic: '1',
-    filtercasestatus: REALTDM_RESALE_STATUS_IDS.join(','),
+    filtercasestatus: REALTDM_ACTIVE_STATUS_IDS.join(','),
     filterpartyname: '',
     filterCaseNumber: '',
     filterParcelNumber: '',
@@ -229,60 +295,123 @@ function formatParcelFromFolio(folio: string): string {
   return `${d.slice(0, 2)}-${d.slice(2, 6)}-${d.slice(6, 9)}-${d.slice(9, 13)}`
 }
 
+function mergeListAndDetails(
+  listCase: Omit<MiamiDadeCase, 'openingBid' | 'propertyAddress'>,
+  detailed: MiamiDadeCase | null
+): MiamiDadeCase {
+  if (!detailed) {
+    return {
+      ...listCase,
+      openingBid: null,
+      propertyAddress: 'Address not available',
+    }
+  }
+
+  const propertyAddress =
+    detailed.propertyAddress !== 'Address not available'
+      ? detailed.propertyAddress
+      : 'Address not available'
+
+  return {
+    ...listCase,
+    ...detailed,
+    caseNumber: detailed.caseNumber || listCase.caseNumber,
+    parcelNumber: detailed.parcelNumber || listCase.parcelNumber,
+    parcelNormalized: detailed.parcelNormalized || listCase.parcelNormalized,
+    saleDate: detailed.saleDate || listCase.saleDate,
+    status: detailed.status || listCase.status,
+    propertyAddress,
+  }
+}
+
 async function enrichCasesWithDetails(
   listCases: Omit<MiamiDadeCase, 'openingBid' | 'propertyAddress'>[],
   cookie: string
 ): Promise<MiamiDadeCase[]> {
-  const results: MiamiDadeCase[] = []
+  const toEnrich = listCases.slice(0, MAX_DETAIL_ENRICHMENT)
+  const remainder = listCases.slice(MAX_DETAIL_ENRICHMENT)
 
-  for (const listCase of listCases) {
-    try {
-      const detailed = await fetchCaseDetails(listCase.caseId, cookie)
-      if (detailed) {
-        results.push({
-          ...listCase,
-          ...detailed,
-          caseNumber: detailed.caseNumber || listCase.caseNumber,
-          parcelNumber: detailed.parcelNumber || listCase.parcelNumber,
-          parcelNormalized:
-            detailed.parcelNormalized || listCase.parcelNormalized,
-          saleDate: detailed.saleDate || listCase.saleDate,
-          status: detailed.status || listCase.status,
-        })
-      } else {
-        results.push({
-          ...listCase,
-          openingBid: null,
-          propertyAddress: 'Address not available',
-        })
+  const enriched = await runWithConcurrency(
+    toEnrich,
+    DETAIL_FETCH_CONCURRENCY,
+    async listCase => {
+      try {
+        const detailed = await fetchCaseDetails(listCase.caseId, cookie)
+        return mergeListAndDetails(listCase, detailed)
+      } catch {
+        return mergeListAndDetails(listCase, null)
       }
-    } catch {
-      results.push({
-        ...listCase,
-        openingBid: null,
-        propertyAddress: 'Address not available',
-      })
+    }
+  )
+
+  const rest = remainder.map(listCase => mergeListAndDetails(listCase, null))
+
+  return [...enriched, ...rest]
+}
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let nextIndex = 0
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex++
+      results[index] = await fn(items[index])
     }
   }
 
+  const workers = Math.min(concurrency, items.length)
+  await Promise.all(Array.from({ length: workers }, () => worker()))
   return results
 }
 
-/** Fetch active resale tax deed cases from RealTDM public search. */
+async function fetchAllListCases(
+  perPage: number,
+  cookie: string
+): Promise<{ cases: Omit<MiamiDadeCase, 'openingBid' | 'propertyAddress'>[]; cookie: string }> {
+  const seen = new Set<string>()
+  const all: Omit<MiamiDadeCase, 'openingBid' | 'propertyAddress'>[] = []
+  let currentCookie = cookie
+  let totalPages = 1
+
+  for (let page = 1; page <= totalPages; page++) {
+    const { html, cookie: nextCookie } = await realTdmPost(
+      REALTDM_CASE_LIST_URL,
+      buildListSearchBody(page, perPage),
+      currentCookie
+    )
+    currentCookie = nextCookie
+    if (page === 1) totalPages = parseTotalPages(html)
+
+    for (const listCase of parseListCases(html)) {
+      if (seen.has(listCase.caseId)) continue
+      seen.add(listCase.caseId)
+      all.push(listCase)
+    }
+  }
+
+  return { cases: all, cookie: currentCookie }
+}
+
+/** Fetch active tax deed cases from RealTDM public search (all result pages). */
 export async function fetchMiamiDadeTaxDeedCases(perPage = 100): Promise<{
   cases: MiamiDadeCase[]
   count: number
+  detailsEnriched: number
+  totalListed: number
 }> {
-  let cookie = ''
-  const { html, cookie: listCookie } = await realTdmPost(
-    REALTDM_CASE_LIST_URL,
-    buildListSearchBody(perPage),
-    cookie
-  )
-  cookie = listCookie
-
-  const listCases = parseListCases(html)
+  const { cases: listCases, cookie } = await fetchAllListCases(perPage, '')
   const cases = await enrichCasesWithDetails(listCases, cookie)
+  const detailsEnriched = Math.min(listCases.length, MAX_DETAIL_ENRICHMENT)
 
-  return { cases, count: cases.length }
+  return {
+    cases,
+    count: cases.length,
+    detailsEnriched,
+    totalListed: listCases.length,
+  }
 }

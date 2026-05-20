@@ -21,6 +21,26 @@ export function buildPropertyIndex(properties: MiamiDadeProperty[]): Map<string,
   return index
 }
 
+/** Parse RealTDM sale date strings (e.g. "May 21, 2026"). */
+export function parseSaleDate(saleDate: string): Date | null {
+  const trimmed = saleDate.trim()
+  if (!trimmed) return null
+  const parsed = Date.parse(trimmed)
+  if (Number.isNaN(parsed)) return null
+  const d = new Date(parsed)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+/** True when sale date is today or later (local time). */
+export function isUpcomingSale(saleDate: string): boolean {
+  const sale = parseSaleDate(saleDate)
+  if (!sale) return false
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return sale.getTime() >= today.getTime()
+}
+
 export function mergeLiveData(
   cases: MiamiDadeCase[],
   properties: MiamiDadeProperty[]

@@ -130,8 +130,10 @@ export default function SearchTab() {
 
           {filtered.length === 0 ? (
             <div className="text-center py-20" style={{ color: 'var(--muted)' }}>
-              <div className="font-display text-4xl tracking-wide mb-2">NO RECORDS</div>
-              <div className="font-mono text-xs">Try adjusting your filters</div>
+              <div className="font-display text-4xl tracking-wide mb-2">NO RECORDS FOUND</div>
+              <div className="font-mono text-xs mt-2 max-w-md mx-auto">
+                Live data is available in the Live Data tab.
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">

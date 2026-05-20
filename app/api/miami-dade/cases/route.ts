@@ -5,8 +5,8 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const { cases, count } = await fetchMiamiDadeTaxDeedCases(100)
-    return NextResponse.json({ cases, count })
+    const { cases, count, detailsEnriched, totalListed } = await fetchMiamiDadeTaxDeedCases(100)
+    return NextResponse.json({ cases, count, detailsEnriched, totalListed })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to load RealTDM cases'
     return NextResponse.json({ error: message, cases: [] }, { status: 502 })

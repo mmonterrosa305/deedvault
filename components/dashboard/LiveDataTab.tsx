@@ -5,7 +5,7 @@ import type { MiamiDadeProperty } from '@/lib/miami-dade-api'
 import { REALFORECLOSE_URL } from '@/lib/miami-dade-api'
 import type { MiamiDadeCase } from '@/lib/miami-dade-realtdm'
 import { fmt } from '@/lib/listings'
-import { mergeLiveData, type LiveDataRecord } from '@/lib/live-data-merge'
+import { isUpcomingSale, mergeLiveData, type LiveDataRecord } from '@/lib/live-data-merge'
 import LivePropertyModal from '@/components/listing/LivePropertyModal'
 
 type PropertiesResponse = {
@@ -17,6 +17,8 @@ type PropertiesResponse = {
 type CasesResponse = {
   cases: MiamiDadeCase[]
   count?: number
+  totalListed?: number
+  detailsEnriched?: number
   error?: string
 }
 
@@ -26,6 +28,7 @@ export default function LiveDataTab() {
   const [error, setError] = useState<string | null>(null)
   const [propertySource, setPropertySource] = useState<'primary' | 'fallback' | null>(null)
   const [caseCount, setCaseCount] = useState(0)
+  const [detailsEnriched, setDetailsEnriched] = useState(0)
   const [q, setQ] = useState('')
   const [selected, setSelected] = useState<LiveDataRecord | null>(null)
 
@@ -60,7 +63,8 @@ export default function LiveDataTab() {
         if (!cancelled) {
           setRecords(mergeLiveData(cases, properties))
           setPropertySource(propsRes.ok ? (propsData.source ?? null) : null)
-          setCaseCount(cases.length)
+          setCaseCount(casesData.totalListed ?? cases.length)
+          setDetailsEnriched(casesData.detailsEnriched ?? cases.length)
           if (!casesRes.ok) {
             setError(`Cases unavailable: ${casesData.error}`)
           } else if (!propsRes.ok) {
@@ -83,10 +87,18 @@ export default function LiveDataTab() {
     }
   }, [])
 
+  const upcomingRecords = useMemo(
+    () => records.filter(r => isUpcomingSale(r.case.saleDate)),
+    [records]
+  )
+
+  const totalCases = records.length
+  const upcomingCount = upcomingRecords.length
+
   const filtered = useMemo(() => {
-    if (!q) return records
+    if (!q) return upcomingRecords
     const lq = q.toLowerCase()
-    return records.filter(r => {
+    return upcomingRecords.filter(r => {
       const c = r.case
       return (
         c.caseNumber.toLowerCase().includes(lq) ||
@@ -96,7 +108,7 @@ export default function LiveDataTab() {
         (r.displayOwner?.toLowerCase().includes(lq) ?? false)
       )
     })
-  }, [records, q])
+  }, [upcomingRecords, q])
 
   return (
     <div className="px-4 sm:px-6 py-6 max-w-6xl mx-auto">
@@ -111,8 +123,9 @@ export default function LiveDataTab() {
           LIVE TAX DEED CASES
         </h2>
         <p className="font-mono text-xs mt-2 max-w-2xl" style={{ color: 'var(--muted)' }}>
-          Active resale cases from RealTDM (30-day and full advertisement), merged with county parcel
-          records when the parcel number matches.
+          Active tax deed cases from RealTDM (sold, defaulted, redemption, and resale statuses),
+          merged with county parcel records when the parcel number matches. Only cases with a
+          sale date today or in the future are shown.
           {propertySource === 'fallback' &&
             ' (ArcGIS using county backup endpoint.)'}
         </p>
@@ -160,19 +173,45 @@ export default function LiveDataTab() {
         </div>
       )}
 
-      {!loading && (records.length > 0 || !error) && (
+      {!loading && (totalCases > 0 || !error) && (
         <>
-          {error && records.length > 0 && (
+          {error && totalCases > 0 && (
             <p className="font-mono text-xs mb-3" style={{ color: '#e87a5a' }}>{error}</p>
           )}
+          <p
+            className="font-mono text-xs mb-3 px-3 py-2 rounded"
+            style={{
+              color: 'var(--muted)',
+              background: 'var(--panel)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            <span style={{ color: 'var(--gold)' }}>{upcomingCount}</span> upcoming sale
+            {upcomingCount !== 1 ? 's' : ''} shown ·{' '}
+            <span style={{ color: 'var(--text)' }}>{totalCases}</span> total cases found on RealTDM
+            {totalCases > upcomingCount && (
+              <> ({totalCases - upcomingCount} past sale{totalCases - upcomingCount !== 1 ? 's' : ''} hidden)</>
+            )}
+          </p>
           <p className="font-mono text-xs mb-4" style={{ color: 'var(--muted)' }}>
-            {filtered.length} CASE{filtered.length !== 1 ? 'S' : ''} · REALTDM: {caseCount}
+            {q
+              ? `${filtered.length} match${filtered.length !== 1 ? 'es' : ''} · `
+              : ''}
+            {filtered.length} DISPLAYED · REALTDM: {caseCount}
+            {detailsEnriched < caseCount && ` · BIDS/ADDRS: ${detailsEnriched}`}
             {propertySource != null && ` · PARCELS: ${propertySource.toUpperCase()}`}
           </p>
 
           {filtered.length === 0 ? (
             <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
-              <p className="font-display text-3xl">NO MATCHES</p>
+              <p className="font-display text-3xl">
+                {upcomingCount === 0 ? 'NO UPCOMING SALES' : 'NO MATCHES'}
+              </p>
+              {upcomingCount === 0 && totalCases > 0 && (
+                <p className="font-mono text-xs mt-2">
+                  All {totalCases} cases have sale dates in the past.
+                </p>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
