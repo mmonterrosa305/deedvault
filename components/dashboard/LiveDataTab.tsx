@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import type { MiamiDadeProperty } from '@/lib/miami-dade-api'
 import { REALFORECLOSE_URL } from '@/lib/miami-dade-api'
 import { fmt } from '@/lib/listings'
+import LivePropertyModal from '@/components/listing/LivePropertyModal'
 
 type ApiResponse = {
   properties: MiamiDadeProperty[]
@@ -18,6 +19,7 @@ export default function LiveDataTab() {
   const [error, setError] = useState<string | null>(null)
   const [source, setSource] = useState<'primary' | 'fallback' | null>(null)
   const [q, setQ] = useState('')
+  const [selected, setSelected] = useState<MiamiDadeProperty | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -61,6 +63,7 @@ export default function LiveDataTab() {
 
   return (
     <div className="px-4 sm:px-6 py-6 max-w-6xl mx-auto">
+      {selected && <LivePropertyModal property={selected} onClose={() => setSelected(null)} />}
       <div className="mb-6">
         <p className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
           MIAMI-DADE COUNTY · LIVE OPEN DATA
@@ -122,7 +125,16 @@ export default function LiveDataTab() {
               {filtered.map(p => (
                 <article
                   key={p.folio}
-                  className="rounded-md p-4 transition-all"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelected(p)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      setSelected(p)
+                    }
+                  }}
+                  className="rounded-md p-4 transition-all cursor-pointer"
                   style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
                   onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-dim)')}
                   onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
@@ -180,6 +192,7 @@ export default function LiveDataTab() {
                         href={REALFORECLOSE_URL}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
                         className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
                         style={{
                           background: 'var(--gold-glow)',
