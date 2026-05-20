@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 
-export type TabId = 'search' | 'saved' | 'alerts' | 'agent' | 'settings'
+export type TabId = 'search' | 'saved' | 'alerts' | 'agent' | 'live' | 'settings'
 
 export type SavedProperty = {
   listingId: string

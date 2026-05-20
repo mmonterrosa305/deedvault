@@ -7,6 +7,7 @@ import SavedTab from '@/components/dashboard/SavedTab'
 import AlertsTab from '@/components/dashboard/AlertsTab'
 import AgentTab from '@/components/dashboard/AgentTab'
 import SettingsTab from '@/components/dashboard/SettingsTab'
+import LiveDataTab from '@/components/dashboard/LiveDataTab'
 
 function DashboardContent() {
   const { activeTab } = useDashboard()
@@ -17,6 +18,7 @@ function DashboardContent() {
       {activeTab === 'saved' && <SavedTab />}
       {activeTab === 'alerts' && <AlertsTab />}
       {activeTab === 'agent' && <AgentTab />}
+      {activeTab === 'live' && <LiveDataTab />}
       {activeTab === 'settings' && <SettingsTab />}
     </>
   )
