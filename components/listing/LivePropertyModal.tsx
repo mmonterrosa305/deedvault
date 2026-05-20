@@ -5,6 +5,7 @@ import { REALFORECLOSE_URL } from '@/lib/miami-dade-api'
 import { fmt } from '@/lib/listings'
 import { streetViewImageUrl } from '@/lib/listing-details'
 import type { LiveDataRecord } from '@/lib/live-data-merge'
+import { caseUniqueId, countyBaseUrl } from '@/lib/realtdm'
 
 function ModalSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -37,9 +38,8 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 function streetViewAddress(address: string): string | null {
   const addr = address.trim()
   if (!addr || addr === 'Address not available') return null
-  return addr.toLowerCase().includes('miami') || addr.toLowerCase().includes('fl')
-    ? addr
-    : `${addr}, Miami, FL`
+  if (/,\s*[A-Z]{2}\b/i.test(addr) || addr.toLowerCase().includes('fl')) return addr
+  return `${addr}, FL`
 }
 
 type Props = { record: LiveDataRecord; onClose: () => void }
@@ -52,7 +52,7 @@ export default function LivePropertyModal({ record, onClose }: Props) {
 
   useEffect(() => {
     setPhotoError(false)
-  }, [taxCase.caseId])
+  }, [caseUniqueId(taxCase)])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -101,7 +101,7 @@ export default function LivePropertyModal({ record, onClose }: Props) {
               className="font-display text-xl tracking-wide truncate"
               style={{ color: 'var(--text)' }}
             >
-              MIAMI-DADE — FL
+              {taxCase.county.toUpperCase()} — FL
             </h2>
           </div>
           <button
@@ -167,6 +167,7 @@ export default function LivePropertyModal({ record, onClose }: Props) {
           </ModalSection>
 
           <ModalSection title="TAX DEED CASE (REALTDM)">
+            <DetailRow label="COUNTY" value={taxCase.county} />
             <DetailRow label="CASE NUMBER" value={taxCase.caseNumber} />
             <DetailRow label="PARCEL NUMBER" value={taxCase.parcelNumber} />
             <DetailRow label="PROPERTY ADDRESS" value={displayAddress} />
@@ -178,8 +179,8 @@ export default function LivePropertyModal({ record, onClose }: Props) {
             />
           </ModalSection>
 
-          {property && (
-            <ModalSection title="PARCEL RECORD (ARC GIS)">
+          {property && taxCase.countyKey === 'miamidade' && (
+            <ModalSection title="PARCEL RECORD (MIAMI-DADE GIS)">
               <DetailRow label="FOLIO" value={property.folio} />
               <DetailRow label="OWNER" value={property.owner1} />
               <DetailRow
@@ -197,10 +198,16 @@ export default function LivePropertyModal({ record, onClose }: Props) {
 
           <ModalSection title="AUCTION & TAX DEED">
             <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>
-              Search this parcel on Miami-Dade&apos;s official tax deed and foreclosure auction site.
+              {taxCase.countyKey === 'miamidade'
+                ? "Search this parcel on Miami-Dade's official tax deed and foreclosure auction site."
+                : `Open ${taxCase.county} County's public RealTDM case search.`}
             </p>
             <a
-              href={REALFORECLOSE_URL}
+              href={
+                taxCase.countyKey === 'miamidade'
+                  ? REALFORECLOSE_URL
+                  : `${countyBaseUrl({ key: taxCase.countyKey, name: taxCase.county, subdomain: taxCase.subdomain })}/public/cases/list`
+              }
               target="_blank"
               rel="noopener noreferrer"
               className="font-mono text-xs tracking-widest px-4 py-2.5 rounded transition-all inline-block text-center w-full sm:w-auto"
@@ -210,7 +217,9 @@ export default function LivePropertyModal({ record, onClose }: Props) {
                 color: 'var(--gold)',
               }}
             >
-              VIEW ON REALFORECLOSE →
+              {taxCase.countyKey === 'miamidade'
+                ? 'VIEW ON REALFORECLOSE →'
+                : 'VIEW ON REALTDM →'}
             </a>
           </ModalSection>
         </div>

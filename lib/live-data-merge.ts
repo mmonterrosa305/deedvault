@@ -1,9 +1,10 @@
 import type { MiamiDadeProperty } from '@/lib/miami-dade-api'
-import { normalizeParcelNumber } from '@/lib/miami-dade-realtdm'
-import type { MiamiDadeCase } from '@/lib/miami-dade-realtdm'
+import { isUpcomingSale, normalizeParcelNumber, type RealTdmCase } from '@/lib/realtdm'
+
+export { isUpcomingSale } from '@/lib/realtdm'
 
 export type LiveDataRecord = {
-  case: MiamiDadeCase
+  case: RealTdmCase
   property: MiamiDadeProperty | null
   /** Best display address: case address, else ArcGIS site address */
   displayAddress: string
@@ -21,34 +22,15 @@ export function buildPropertyIndex(properties: MiamiDadeProperty[]): Map<string,
   return index
 }
 
-/** Parse RealTDM sale date strings (e.g. "May 21, 2026"). */
-export function parseSaleDate(saleDate: string): Date | null {
-  const trimmed = saleDate.trim()
-  if (!trimmed) return null
-  const parsed = Date.parse(trimmed)
-  if (Number.isNaN(parsed)) return null
-  const d = new Date(parsed)
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
-/** True when sale date is today or later (local time). */
-export function isUpcomingSale(saleDate: string): boolean {
-  const sale = parseSaleDate(saleDate)
-  if (!sale) return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return sale.getTime() >= today.getTime()
-}
-
 export function mergeLiveData(
-  cases: MiamiDadeCase[],
+  cases: RealTdmCase[],
   properties: MiamiDadeProperty[]
 ): LiveDataRecord[] {
   const byParcel = buildPropertyIndex(properties)
 
   return cases.map(c => {
-    const property = byParcel.get(c.parcelNormalized) ?? null
+    const property =
+      c.countyKey === 'miamidade' ? (byParcel.get(c.parcelNormalized) ?? null) : null
     const displayAddress =
       c.propertyAddress !== 'Address not available'
         ? c.propertyAddress
