@@ -100,6 +100,61 @@ input.vault-checkbox {
   50% { opacity: 0.3; }
 }
 
+.live-indicator-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3aaa6e;
+  flex-shrink: 0;
+  animation: liveDotPulse 2s ease-in-out infinite;
+}
+@keyframes liveDotPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 6px rgba(58, 170, 110, 0.7);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+    box-shadow: 0 0 2px rgba(58, 170, 110, 0.25);
+  }
+}
+
+.live-tab-label {
+  animation: liveTabGoldGlow 2.5s ease-in-out infinite;
+}
+.live-tab-label--active {
+  animation: liveTabGoldGlowActive 2.5s ease-in-out infinite;
+}
+
+.loading-gold-glow {
+  color: var(--gold);
+  animation: liveTabGoldGlowActive 2.5s ease-in-out infinite;
+}
+@keyframes liveTabGoldGlow {
+  0%, 100% {
+    color: var(--muted);
+    text-shadow: 0 0 4px rgba(201, 168, 76, 0.12);
+  }
+  50% {
+    color: var(--gold);
+    text-shadow:
+      0 0 10px rgba(201, 168, 76, 0.55),
+      0 0 22px rgba(201, 168, 76, 0.28);
+  }
+}
+@keyframes liveTabGoldGlowActive {
+  0%, 100% {
+    text-shadow: 0 0 6px rgba(201, 168, 76, 0.35);
+  }
+  50% {
+    text-shadow:
+      0 0 14px rgba(201, 168, 76, 0.75),
+      0 0 28px rgba(201, 168, 76, 0.4);
+  }
+}
+
 @keyframes modalSlideUp {
   from { opacity: 0; transform: translateY(24px); }
   to { opacity: 1; transform: translateY(0); }

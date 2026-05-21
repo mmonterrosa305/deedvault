@@ -35,13 +35,33 @@ export default function DashboardTabNav() {
               onClick={() => setActiveTab(tab.id)}
               className="font-mono text-xs tracking-widest px-4 py-3 transition-all whitespace-nowrap flex items-center gap-2"
               style={{
-                color: active ? 'var(--gold)' : 'var(--muted)',
+                color:
+                  tab.id === 'live'
+                    ? active
+                      ? 'var(--gold)'
+                      : undefined
+                    : active
+                      ? 'var(--gold)'
+                      : 'var(--muted)',
                 borderBottom: active ? '2px solid var(--gold)' : '2px solid transparent',
                 background: 'transparent',
                 cursor: 'pointer',
               }}
             >
-              {tab.label.toUpperCase()}
+              {tab.id === 'live' ? (
+                <>
+                  <span className="live-indicator-dot" aria-hidden />
+                  <span
+                    className={
+                      active ? 'live-tab-label live-tab-label--active' : 'live-tab-label'
+                    }
+                  >
+                    {tab.label.toUpperCase()}
+                  </span>
+                </>
+              ) : (
+                tab.label.toUpperCase()
+              )}
               {badge != null && (
                 <span
                   className="px-1.5 py-0.5 rounded text-[10px]"

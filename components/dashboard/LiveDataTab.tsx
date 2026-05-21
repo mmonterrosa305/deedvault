@@ -81,7 +81,6 @@ export default function LiveDataTab() {
   const [goveaseSheetCount, setGovEaseSheetCount] = useState(0)
   const [goveaseLiveCount, setGovEaseLiveCount] = useState(0)
   const [loadedCountyCount, setLoadedCountyCount] = useState(0)
-  const [loadingCountyNames, setLoadingCountyNames] = useState<string[]>([])
   const [loadingParcels, setLoadingParcels] = useState(false)
   const [loadingGovEase, setLoadingGovEase] = useState(false)
   const [loadingBid4Assets, setLoadingBid4Assets] = useState(false)
@@ -96,10 +95,6 @@ export default function LiveDataTab() {
 
     async function loadCounty(county: (typeof FL_REALTDM_COUNTIES)[number]) {
       if (cancelled) return { cases: [] as RealTdmCase[], listed: 0, enriched: 0, err: true }
-
-      setLoadingCountyNames(prev =>
-        prev.includes(county.name) ? prev : [...prev, county.name]
-      )
 
       try {
         const res = await fetch(`/api/realtdm/county/${county.key}`)
@@ -116,7 +111,6 @@ export default function LiveDataTab() {
         return { cases: [] as RealTdmCase[], listed: 0, enriched: 0, err: true }
       } finally {
         if (!cancelled) {
-          setLoadingCountyNames(prev => prev.filter(n => n !== county.name))
           setLoadedCountyCount(prev => prev + 1)
         }
       }
@@ -191,7 +185,6 @@ export default function LiveDataTab() {
       setLoading(true)
       setError(null)
       setLoadedCountyCount(0)
-      setLoadingCountyNames([])
       setLoadingParcels(false)
       setLoadingGovEase(true)
       setLoadingBid4Assets(true)
@@ -439,12 +432,6 @@ export default function LiveDataTab() {
         <LiveDataLoadProgress
           loadedCount={progressLoaded}
           totalCount={progressTotal}
-          loadingCountyNames={[
-            ...loadingCountyNames,
-            ...(loadingGovEase ? ['GovEase'] : []),
-            ...(loadingBid4Assets ? ['Bid4Assets'] : []),
-            ...(loadingSri ? ['SRI'] : []),
-          ]}
           loadingParcels={loadingParcels}
         />
       )}
