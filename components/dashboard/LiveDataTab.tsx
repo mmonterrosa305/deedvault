@@ -475,6 +475,14 @@ export default function LiveDataTab() {
         </button>
       </div>
 
+      <LiveDataFilters
+        filters={filters}
+        counties={availableCounties}
+        disabled={loading}
+        onChange={setFilters}
+        onReset={() => setFilters(defaultLiveDataFilters)}
+      />
+
       {loading && (
         <LiveDataLoadProgress
           loadedCount={progressLoaded}
@@ -580,14 +588,6 @@ export default function LiveDataTab() {
             {propertySource != null && ` · PARCELS: ${propertySource.toUpperCase()}`}
           </p>
 
-          <LiveDataFilters
-            filters={filters}
-            counties={availableCounties}
-            disabled={loading}
-            onChange={setFilters}
-            onReset={() => setFilters(defaultLiveDataFilters)}
-          />
-
           {filtered.length === 0 ? (
             <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
               <p className="font-display text-3xl">
@@ -652,6 +652,23 @@ function GoodDealBadge() {
   )
 }
 
+/** Prominent opening bid — matches LivePropertyModal hero styling. */
+function OpeningBidHighlight({ openingBid }: { openingBid: number | null }) {
+  return (
+    <div
+      className="mb-4 p-4 rounded-md text-center w-full"
+      style={{ background: 'var(--gold-glow)', border: '1px solid rgba(201,168,76,0.35)' }}
+    >
+      <p className="font-mono text-[10px] tracking-widest mb-1" style={{ color: 'var(--muted)' }}>
+        OPENING BID
+      </p>
+      <p className="font-display text-3xl tracking-wide" style={{ color: 'var(--gold)' }}>
+        {openingBid != null ? fmt(openingBid) : '—'}
+      </p>
+    </div>
+  )
+}
+
 function AssessedRatioBlock({
   openingBid,
   assessedValue,
@@ -709,6 +726,7 @@ function RealTdmCard({
           : 'var(--border)')
       }
     >
+      <OpeningBidHighlight openingBid={openingBid} />
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -787,14 +805,6 @@ function RealTdmCard({
         </div>
 
         <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          <div className="text-right">
-            <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
-              OPENING BID
-            </p>
-            <p className="font-display text-2xl tracking-wide" style={{ color: 'var(--gold)' }}>
-              {openingBid != null ? fmt(openingBid) : '—'}
-            </p>
-          </div>
           <AssessedRatioBlock openingBid={openingBid} assessedValue={assessedValue} />
           <a
             href={
@@ -836,6 +846,7 @@ function Bid4AssetsCard({ listing }: { listing: Bid4AssetsListing }) {
           : 'var(--border)')
       }
     >
+      <OpeningBidHighlight openingBid={listing.openingBid} />
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -898,14 +909,6 @@ function Bid4AssetsCard({ listing }: { listing: Bid4AssetsListing }) {
         </div>
 
         <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          <div className="text-right">
-            <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
-              OPENING BID
-            </p>
-            <p className="font-display text-2xl tracking-wide" style={{ color: 'var(--gold)' }}>
-              {listing.openingBid != null ? fmt(listing.openingBid) : '—'}
-            </p>
-          </div>
           <AssessedRatioBlock openingBid={listing.openingBid} assessedValue={null} />
           <a
             href={BID4ASSETS_HOME_URL}
@@ -940,6 +943,7 @@ function SriCard({ listing }: { listing: SriListing }) {
           : 'var(--border)')
       }
     >
+      <OpeningBidHighlight openingBid={listing.openingBid} />
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -1002,14 +1006,6 @@ function SriCard({ listing }: { listing: SriListing }) {
         </div>
 
         <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          <div className="text-right">
-            <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
-              OPENING BID
-            </p>
-            <p className="font-display text-2xl tracking-wide" style={{ color: 'var(--gold)' }}>
-              {listing.openingBid != null ? fmt(listing.openingBid) : '—'}
-            </p>
-          </div>
           <AssessedRatioBlock openingBid={listing.openingBid} assessedValue={null} />
           <a
             href={SRI_HOME_URL}
@@ -1044,6 +1040,7 @@ function RealForecloseCard({ listing }: { listing: RealForecloseListing }) {
           : 'var(--border)')
       }
     >
+      <OpeningBidHighlight openingBid={listing.openingBid} />
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -1118,14 +1115,6 @@ function RealForecloseCard({ listing }: { listing: RealForecloseListing }) {
         </div>
 
         <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          <div className="text-right">
-            <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
-              OPENING BID
-            </p>
-            <p className="font-display text-2xl tracking-wide" style={{ color: 'var(--gold)' }}>
-              {listing.openingBid != null ? fmt(listing.openingBid) : '—'}
-            </p>
-          </div>
           <AssessedRatioBlock
             openingBid={listing.openingBid}
             assessedValue={listing.assessedValue}
@@ -1164,6 +1153,7 @@ function GovEaseCard({ listing }: { listing: GovEaseListing }) {
           : 'var(--border)')
       }
     >
+      <OpeningBidHighlight openingBid={listing.openingBid} />
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -1228,14 +1218,6 @@ function GovEaseCard({ listing }: { listing: GovEaseListing }) {
         </div>
 
         <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          <div className="text-right">
-            <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
-              OPENING BID
-            </p>
-            <p className="font-display text-2xl tracking-wide" style={{ color: 'var(--gold)' }}>
-              {listing.openingBid != null ? fmt(listing.openingBid) : '—'}
-            </p>
-          </div>
           <AssessedRatioBlock openingBid={listing.openingBid} assessedValue={null} />
           <a
             href={href}

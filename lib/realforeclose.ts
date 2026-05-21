@@ -13,6 +13,7 @@ const DEFAULT_AUCTION_TIME = '9:00 AM ET'
 const DAYS_AHEAD = 90
 const PAGE_SIZE_HINT = 10
 const DATE_CONCURRENCY = 4
+const DETAIL_BID_CONCURRENCY = 6
 
 const FETCH_HEADERS = {
   'User-Agent':
@@ -164,9 +165,43 @@ function decodeRetHtml(encoded: string): string {
     ['@J', 'p_back="NextCheck='],
     ['@K', 'style="Display:none"'],
     ['@L', '/index.cfm?zaction=auction&zmethod=details&AID='],
+    ['@CAD_LBL', 'AD_LBL'],
+    ['@CAD_DTA', 'AD_DTA'],
   ]
   for (const [a, b] of reps) html = html.split(a).join(b)
   return html
+}
+
+/** Normalize auction type for comparison (e.g. "TAX DEED" → TAXDEED). */
+function normalizeAuctionType(raw: string): string {
+  return raw.replace(/\s+/g, '').toUpperCase()
+}
+
+/** Only tax deed sales — excludes FORECLOSURE, mortgage, and other types. */
+export function isTaxDeedAuctionType(auctionType: string): boolean {
+  return normalizeAuctionType(auctionType) === 'TAXDEED'
+}
+
+function mmDdYyyyFromIso(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return iso
+  const [, yr, mo, da] = m
+  return `${mo}/${da}/${yr}`
+}
+
+function addParsedField(
+  fields: Record<string, string>,
+  labelRaw: string,
+  valueRaw: string
+): void {
+  const label = stripTags(labelRaw).replace(/:$/, '').trim()
+  const value = stripTags(valueRaw).trim()
+  if (!label) return
+  if (label === 'Property Address' && fields['Property Address']) {
+    fields['Property Address Line 2'] = value
+  } else {
+    fields[label] = value
+  }
 }
 
 function extractJsonPayload(raw: string): LoadJson | null {
@@ -197,16 +232,21 @@ function parseTableFields(block: string): Record<string, string> {
     /<tr[^>]*>[\s\S]*?AD_LBL[^>]*>([^<]*):?<\/td>[\s\S]*?AD_DTA[^>]*>([\s\S]*?)<\/td>/gi
   let match: RegExpExecArray | null
   while ((match = rowRe.exec(block)) !== null) {
-    const label = stripTags(match[1]).replace(/:$/, '').trim()
-    const value = stripTags(match[2]).trim()
-    if (!label) continue
-    if (label === 'Property Address' && fields['Property Address']) {
-      fields['Property Address Line 2'] = value
-    } else {
-      fields[label] = value
-    }
+    addParsedField(fields, match[1], match[2])
+  }
+  const divRe =
+    /AD_LBL[^>]*>([^<]*):?<\/div>\s*<div[^>]*AD_DTA[^>]*>([\s\S]*?)<\/div>/gi
+  while ((match = divRe.exec(block)) !== null) {
+    addParsedField(fields, match[1], match[2])
   }
   return fields
+}
+
+function parseOpeningBidFromHtml(html: string, auctionId: string): number | null {
+  const block =
+    html.split(`id="AITEM_${auctionId}"`)[1]?.split(/id="AITEM_\d+"/)[0] ?? html
+  const fields = parseTableFields(block)
+  return parseMoney(fields['Opening Bid'] ?? '')
 }
 
 function buildAddress(fields: Record<string, string>): string {
@@ -236,6 +276,8 @@ function parseAuctionBlocks(
     const caseNumber = (fields['Case #'] ?? fields['Case Number'] ?? '').trim()
     const parcelId = (fields['Parcel ID'] ?? '').trim()
     const auctionType = (fields['Auction Type'] ?? '').trim()
+    if (!isTaxDeedAuctionType(auctionType)) continue
+
     const caseSlug = caseNumber.replace(/\s+/g, '') || parcelId || auctionId
 
     listings.push({
@@ -251,7 +293,7 @@ function parseAuctionBlocks(
       auctionDate: isoDate,
       auctionTime: DEFAULT_AUCTION_TIME,
       auctionDateTime,
-      auctionType: auctionType || '—',
+      auctionType: 'TAXDEED',
       certificateNumber: fields['Certificate #']?.trim() || null,
       auctionId,
       auctionUrl: `${origin}/index.cfm?zaction=auction&zmethod=details&AID=${auctionId}`,
@@ -318,7 +360,126 @@ async function fetchWaitingForDate(
     displayDate
   )
   const isoDate = isoDateFromMmDdYyyy(auctionDateMmDdYyyy)
-  return listings.filter(l => isUpcomingSale(isoDate))
+  const upcoming = listings.filter(l => isUpcomingSale(isoDate))
+  if (upcoming.length > 0 && alb) {
+    const encAlb = encodeURIComponent(alb)
+    await enrichMissingOpeningBids(session, origin, preview, upcoming)
+  }
+  return upcoming
+}
+
+async function enrichMissingOpeningBids(
+  session: ForecloseSession,
+  origin: string,
+  preview: string,
+  listings: RealForecloseListing[]
+): Promise<void> {
+  const missing = listings.filter(l => l.openingBid == null)
+  if (missing.length === 0) return
+
+  const tx = () => String(Date.now())
+
+  for (let i = 0; i < missing.length; i += DETAIL_BID_CONCURRENCY) {
+    const batch = missing.slice(i, i + DETAIL_BID_CONCURRENCY)
+    await Promise.all(
+      batch.map(async listing => {
+        try {
+          const loadRaw = await session.fetchText(
+            `${origin}/index.cfm?zaction=AUCTION&Zmethod=UPDATE&FNC=LOAD&AREA=W&AID=${listing.auctionId}&tx=${tx()}`,
+            preview
+          )
+          const payload = extractJsonPayload(loadRaw)
+          if (!payload?.retHTML) return
+          const bid = parseOpeningBidFromHtml(decodeRetHtml(payload.retHTML), listing.auctionId)
+          if (bid != null) listing.openingBid = bid
+        } catch {
+          /* keep null bid */
+        }
+      })
+    )
+  }
+}
+
+async function fetchOpeningBidFromDetailPage(
+  county: RealForecloseCounty,
+  listing: RealForecloseListing
+): Promise<number | null> {
+  const origin = countyOrigin(county)
+  const mmDdYyyy = mmDdYyyyFromIso(listing.auctionDate)
+  const preview = previewUrl(origin, mmDdYyyy)
+  const session = new ForecloseSession()
+  try {
+    const previewHtml = await session.fetchText(preview)
+    const albMatch = previewHtml.match(/id="ALB"[^>]*>([^<]+)/i)
+    if (!albMatch) return null
+    const encAlb = encodeURIComponent(albMatch[1].trim())
+    const tx = () => String(Date.now())
+    await session.fetchText(
+      `${origin}/index.cfm?zaction=AUCTION&ZMETHOD=UPDATE&FNC=RESET&ALB=${encAlb}&tx=${tx()}`,
+      preview
+    )
+    await session.fetchText(
+      `${origin}/index.cfm?zaction=AUCTION&Zmethod=UPDATE&FNC=LOAD&AREA=R&PageDir=0&doR=1&tx=${tx()}&bypassPage=1`,
+      preview
+    )
+    const loadRaw = await session.fetchText(
+      `${origin}/index.cfm?zaction=AUCTION&Zmethod=UPDATE&FNC=LOAD&AREA=W&AID=${listing.auctionId}&tx=${tx()}`,
+      preview
+    )
+    const payload = extractJsonPayload(loadRaw)
+    if (!payload?.retHTML) return null
+    return parseOpeningBidFromHtml(decodeRetHtml(payload.retHTML), listing.auctionId)
+  } catch {
+    return null
+  }
+}
+
+async function enrichCountyMissingOpeningBids(
+  county: RealForecloseCounty,
+  listings: RealForecloseListing[]
+): Promise<void> {
+  const missing = listings.filter(l => l.openingBid == null)
+  if (missing.length === 0) return
+
+  const origin = countyOrigin(county)
+  const byDate = new Map<string, RealForecloseListing[]>()
+  for (const listing of missing) {
+    const key = mmDdYyyyFromIso(listing.auctionDate)
+    const group = byDate.get(key) ?? []
+    group.push(listing)
+    byDate.set(key, group)
+  }
+
+  for (const [mmDdYyyy, group] of byDate) {
+    const preview = previewUrl(origin, mmDdYyyy)
+    const session = new ForecloseSession()
+    try {
+      const previewHtml = await session.fetchText(preview)
+      const albMatch = previewHtml.match(/id="ALB"[^>]*>([^<]+)/i)
+      if (!albMatch) continue
+      const encAlb = encodeURIComponent(albMatch[1].trim())
+      const tx = () => String(Date.now())
+      await session.fetchText(
+        `${origin}/index.cfm?zaction=AUCTION&ZMETHOD=UPDATE&FNC=RESET&ALB=${encAlb}&tx=${tx()}`,
+        preview
+      )
+      await session.fetchText(
+        `${origin}/index.cfm?zaction=AUCTION&Zmethod=UPDATE&FNC=LOAD&AREA=R&PageDir=0&doR=1&tx=${tx()}&bypassPage=1`,
+        preview
+      )
+      await enrichMissingOpeningBids(session, origin, preview, group)
+    } catch {
+      for (let i = 0; i < group.length; i += DETAIL_BID_CONCURRENCY) {
+        const batch = group.slice(i, i + DETAIL_BID_CONCURRENCY)
+        await Promise.all(
+          batch.map(async listing => {
+            const bid = await fetchOpeningBidFromDetailPage(county, listing)
+            if (bid != null) listing.openingBid = bid
+          })
+        )
+      }
+    }
+  }
 }
 
 function upcomingDates(): string[] {
@@ -374,7 +535,9 @@ async function fetchCountyListings(county: RealForecloseCounty): Promise<RealFor
     }
   }
 
-  return [...byId.values()]
+  const listings = [...byId.values()]
+  await enrichCountyMissingOpeningBids(county, listings)
+  return listings
 }
 
 /** Fetch upcoming Florida tax deed auctions from all RealForeclose county sites (90-day preview scan). */
