@@ -19,6 +19,10 @@ import {
   type GovEaseListing,
 } from '@/lib/govease'
 import { SRI_HOME_URL, type SriListing } from '@/lib/sri'
+import {
+  REALFORECLOSE_HOME_URL,
+  type RealForecloseListing,
+} from '@/lib/realforeclose'
 import { fmt } from '@/lib/listings'
 import { mergeLiveData, type LiveDataRecord } from '@/lib/live-data-merge'
 import LivePropertyModal from '@/components/listing/LivePropertyModal'
@@ -57,11 +61,19 @@ type SriResponse = {
   error?: string
 }
 
+type RealForecloseResponse = {
+  listings: RealForecloseListing[]
+  datesScanned?: number
+  datesWithAuctions?: number
+  error?: string
+}
+
 type FeedItem =
   | { kind: 'realtdm'; record: LiveDataRecord }
   | { kind: 'govease'; listing: GovEaseListing }
   | { kind: 'bid4assets'; listing: Bid4AssetsListing }
   | { kind: 'sri'; listing: SriListing }
+  | { kind: 'realforeclose'; listing: RealForecloseListing }
 
 function feedItemKey(item: FeedItem): string {
   if (item.kind === 'realtdm') return caseUniqueId(item.record.case)
@@ -73,6 +85,7 @@ export default function LiveDataTab() {
   const [goveaseListings, setGovEaseListings] = useState<GovEaseListing[]>([])
   const [bid4assetsListings, setBid4assetsListings] = useState<Bid4AssetsListing[]>([])
   const [sriListings, setSriListings] = useState<SriListing[]>([])
+  const [realforecloseListings, setRealforecloseListings] = useState<RealForecloseListing[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [propertySource, setPropertySource] = useState<'primary' | 'fallback' | null>(null)
@@ -85,6 +98,8 @@ export default function LiveDataTab() {
   const [loadingGovEase, setLoadingGovEase] = useState(false)
   const [loadingBid4Assets, setLoadingBid4Assets] = useState(false)
   const [loadingSri, setLoadingSri] = useState(false)
+  const [loadingRealForeclose, setLoadingRealForeclose] = useState(false)
+  const [realforecloseDatesWithAuctions, setRealforecloseDatesWithAuctions] = useState(0)
   const [bid4assetsCalendarCount, setBid4assetsCalendarCount] = useState(0)
   const [bid4assetsSearchCount, setBid4assetsSearchCount] = useState(0)
   const [q, setQ] = useState('')
@@ -160,6 +175,31 @@ export default function LiveDataTab() {
       }
     }
 
+    async function loadRealForeclose(): Promise<RealForecloseResponse & { ok: boolean }> {
+      console.log('Fetching RealForeclose...')
+      setLoadingRealForeclose(true)
+      try {
+        const res = await fetch('/api/realforeclose', { cache: 'no-store' })
+        const data = (await res.json()) as RealForecloseResponse
+        if (!res.ok) throw new Error(data.error ?? 'RealForeclose failed')
+        const count = data.listings?.length ?? 0
+        console.log(`RealForeclose fetch complete: ${count} listings`)
+        return { ...data, ok: true }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'RealForeclose fetch failed'
+        console.log('RealForeclose fetch complete: 0 listings (error)', message)
+        return {
+          ok: false,
+          error: message,
+          listings: [],
+          datesScanned: 0,
+          datesWithAuctions: 0,
+        }
+      } finally {
+        if (!cancelled) setLoadingRealForeclose(false)
+      }
+    }
+
     async function loadGovEase(): Promise<GovEaseResponse & { ok: boolean }> {
       setLoadingGovEase(true)
       try {
@@ -189,51 +229,75 @@ export default function LiveDataTab() {
       setLoadingGovEase(true)
       setLoadingBid4Assets(true)
       setLoadingSri(true)
+      setLoadingRealForeclose(true)
       setRecords([])
       setGovEaseListings([])
       setBid4assetsListings([])
       setSriListings([])
+      setRealforecloseListings([])
       setCaseCount(0)
       setDetailsEnriched(0)
       setGovEaseSheetCount(0)
       setGovEaseLiveCount(0)
       setBid4assetsCalendarCount(0)
       setBid4assetsSearchCount(0)
-
-      const propsPromise = fetch('/api/miami-dade/properties')
-      const goveasePromise = loadGovEase()
-      const bid4assetsPromise = loadBid4Assets()
-      const sriPromise = loadSri()
-
-      const countyResults = await Promise.all(
-        FL_REALTDM_COUNTIES.map(county => loadCounty(county))
-      )
-
-      if (cancelled) return
+      setRealforecloseDatesWithAuctions(0)
 
       setLoadingParcels(true)
-      let properties: MiamiDadeProperty[] = []
-      let propsOk = false
-      let propsErr: string | undefined
 
-      try {
-        const propsRes = await propsPromise
-        const propsData = (await propsRes.json()) as PropertiesResponse
-        propsOk = propsRes.ok
-        properties = propsOk ? (propsData.properties ?? []) : []
-        propsErr = propsData.error
-        if (propsOk) setPropertySource(propsData.source ?? null)
-      } catch {
-        propsErr = 'Failed to load parcel data'
+      async function loadProperties(): Promise<{
+        properties: MiamiDadeProperty[]
+        ok: boolean
+        error?: string
+        source?: 'primary' | 'fallback'
+      }> {
+        try {
+          const propsRes = await fetch('/api/miami-dade/properties', { cache: 'no-store' })
+          const propsData = (await propsRes.json()) as PropertiesResponse
+          return {
+            properties: propsRes.ok ? (propsData.properties ?? []) : [],
+            ok: propsRes.ok,
+            error: propsData.error,
+            source: propsData.source,
+          }
+        } catch {
+          return { properties: [], ok: false, error: 'Failed to load parcel data' }
+        }
       }
 
-      const [goveaseResult, bid4assetsResult, sriResult] = await Promise.all([
-        goveasePromise,
-        bid4assetsPromise,
-        sriPromise,
+      const [
+        countyResults,
+        goveaseResult,
+        bid4assetsResult,
+        sriResult,
+        realforecloseResult,
+        propsResult,
+      ] = await Promise.all([
+        Promise.all(FL_REALTDM_COUNTIES.map(county => loadCounty(county))),
+        loadGovEase(),
+        loadBid4Assets(),
+        loadSri(),
+        loadRealForeclose(),
+        loadProperties(),
       ])
 
       if (cancelled) return
+
+      const properties = propsResult.properties
+      const propsOk = propsResult.ok
+      const propsErr = propsResult.error
+      if (propsOk) setPropertySource(propsResult.source ?? null)
+      else setPropertySource(null)
+
+      setGovEaseListings(goveaseResult.listings ?? [])
+      setGovEaseSheetCount(goveaseResult.sheetCount ?? 0)
+      setGovEaseLiveCount(goveaseResult.liveCount ?? 0)
+      setBid4assetsListings(bid4assetsResult.listings ?? [])
+      setBid4assetsCalendarCount(bid4assetsResult.calendarCount ?? 0)
+      setBid4assetsSearchCount(bid4assetsResult.searchCount ?? 0)
+      setSriListings(sriResult.listings ?? [])
+      setRealforecloseListings(realforecloseResult.listings ?? [])
+      setRealforecloseDatesWithAuctions(realforecloseResult.datesWithAuctions ?? 0)
 
       const allCases = countyResults.flatMap(r => r.cases)
       const totalListed = countyResults.reduce((n, r) => n + r.listed, 0)
@@ -257,18 +321,23 @@ export default function LiveDataTab() {
       if (!sriResult.ok) {
         warnings.push('SRI listings unavailable')
       }
+      if (!realforecloseResult.ok) {
+        warnings.push('RealForeclose listings unavailable')
+      }
       if (!propsOk) {
         warnings.push(`Property data unavailable: ${propsErr}`)
       }
       const goveaseTotal = goveaseResult.listings?.length ?? 0
       const bid4assetsTotal = bid4assetsResult.listings?.length ?? 0
       const sriTotal = sriResult.listings?.length ?? 0
+      const realforecloseTotal = realforecloseResult.listings?.length ?? 0
       if (
         allCases.length === 0 &&
         failedCounties === FL_REALTDM_COUNTY_COUNT &&
         goveaseTotal === 0 &&
         bid4assetsTotal === 0 &&
-        sriTotal === 0
+        sriTotal === 0 &&
+        realforecloseTotal === 0
       ) {
         setError('Failed to load tax deed cases from all sources')
       } else if (warnings.length > 0) {
@@ -291,32 +360,43 @@ export default function LiveDataTab() {
       ...goveaseListings.map(listing => ({ kind: 'govease' as const, listing })),
       ...bid4assetsListings.map(listing => ({ kind: 'bid4assets' as const, listing })),
       ...sriListings.map(listing => ({ kind: 'sri' as const, listing })),
+      ...realforecloseListings.map(listing => ({
+        kind: 'realforeclose' as const,
+        listing,
+      })),
     ]
     items.sort((a, b) => {
       const dateA =
         a.kind === 'realtdm'
           ? Date.parse(a.record.case.saleDate)
-          : Date.parse(a.listing.saleDate)
+          : a.kind === 'realforeclose'
+            ? Date.parse(a.listing.auctionDate)
+            : Date.parse(a.listing.saleDate)
       const dateB =
         b.kind === 'realtdm'
           ? Date.parse(b.record.case.saleDate)
-          : Date.parse(b.listing.saleDate)
+          : b.kind === 'realforeclose'
+            ? Date.parse(b.listing.auctionDate)
+            : Date.parse(b.listing.saleDate)
       const validA = !Number.isNaN(dateA)
       const validB = !Number.isNaN(dateB)
       if (validA && validB && dateA !== dateB) return dateA - dateB
       if (validA && !validB) return -1
       if (!validA && validB) return 1
-      const countyA = a.kind === 'realtdm' ? a.record.case.county : a.listing.county
-      const countyB = b.kind === 'realtdm' ? b.record.case.county : b.listing.county
+      const countyA =
+        a.kind === 'realtdm' ? a.record.case.county : a.listing.county
+      const countyB =
+        b.kind === 'realtdm' ? b.record.case.county : b.listing.county
       return countyA.localeCompare(countyB)
     })
     return items
-  }, [records, goveaseListings, bid4assetsListings, sriListings])
+  }, [records, goveaseListings, bid4assetsListings, sriListings, realforecloseListings])
 
   const upcomingCount = records.length
   const goveaseCount = goveaseListings.length
   const bid4assetsCount = bid4assetsListings.length
   const sriCount = sriListings.length
+  const realforecloseCount = realforecloseListings.length
   const totalDisplayed = feedItems.length
 
   const filtered = useMemo(() => {
@@ -357,6 +437,20 @@ export default function LiveDataTab() {
           s.state.toLowerCase().includes(lq)
         )
       }
+      if (item.kind === 'realforeclose') {
+        const r = item.listing
+        return (
+          r.county.toLowerCase().includes(lq) ||
+          r.caseNumber.toLowerCase().includes(lq) ||
+          r.parcelId.toLowerCase().includes(lq) ||
+          r.address.toLowerCase().includes(lq) ||
+          r.auctionType.toLowerCase().includes(lq) ||
+          r.auctionDateTime.toLowerCase().includes(lq) ||
+          r.auctionDate.toLowerCase().includes(lq) ||
+          r.state.toLowerCase().includes(lq) ||
+          (r.certificateNumber?.toLowerCase().includes(lq) ?? false)
+        )
+      }
       const b = item.listing
       return (
         b.county.toLowerCase().includes(lq) ||
@@ -368,12 +462,13 @@ export default function LiveDataTab() {
     })
   }, [feedItems, q])
 
-  const progressTotal = FL_REALTDM_COUNTY_COUNT + 3
+  const progressTotal = FL_REALTDM_COUNTY_COUNT + 4
   const progressLoaded =
     loadedCountyCount +
     (loadingGovEase ? 0 : 1) +
     (loadingBid4Assets ? 0 : 1) +
-    (loadingSri ? 0 : 1)
+    (loadingSri ? 0 : 1) +
+    (loadingRealForeclose ? 0 : 1)
 
   return (
     <div className="px-4 sm:px-6 py-6 max-w-6xl mx-auto">
@@ -382,7 +477,7 @@ export default function LiveDataTab() {
       )}
       <div className="mb-6">
         <p className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
-          FLORIDA · MICHIGAN · REALTDM + GOVEASE + BID4ASSETS + SRI
+          FLORIDA · MICHIGAN · REALTDM + GOVEASE + BID4ASSETS + SRI + REALFORECLOSE
         </p>
         <h2 className="font-display text-3xl tracking-wide mt-1" style={{ color: 'var(--text)' }}>
           LIVE TAX DEED CASES
@@ -390,7 +485,8 @@ export default function LiveDataTab() {
         <p className="font-mono text-xs mt-2 max-w-2xl" style={{ color: 'var(--muted)' }}>
           Upcoming resale auctions (30-day and full advertisement) from Florida RealTDM counties,
           GovEase schedule and live parcels (10 FL counties), Bid4Assets tax sales (10 MI counties),
-          and SRI tax deed auctions (10 MI counties). Miami-Dade parcels merge with county GIS when
+          SRI tax deed auctions (10 MI counties), and Miami-Dade RealForeclose waiting auctions.
+          Miami-Dade parcels merge with county GIS when
           the parcel number matches. Only
           cases with a sale date today or later are shown.
           {propertySource === 'fallback' &&
@@ -433,6 +529,12 @@ export default function LiveDataTab() {
           loadedCount={progressLoaded}
           totalCount={progressTotal}
           loadingParcels={loadingParcels}
+          loadingSourceNames={[
+            ...(loadingGovEase ? ['GovEase'] : []),
+            ...(loadingBid4Assets ? ['Bid4Assets'] : []),
+            ...(loadingSri ? ['SRI'] : []),
+            ...(loadingRealForeclose ? ['RealForeclose'] : []),
+          ]}
         />
       )}
 
@@ -486,6 +588,16 @@ export default function LiveDataTab() {
             <span style={{ color: 'var(--gold)' }}>{sriCount}</span> SRI listing
             {sriCount !== 1 ? 's' : ''}
             {' · '}
+            <span style={{ color: 'var(--gold)' }}>{realforecloseCount}</span> RealForeclose
+            listing{realforecloseCount !== 1 ? 's' : ''}
+            {realforecloseCount > 0 && realforecloseDatesWithAuctions > 0 && (
+              <>
+                {' '}
+                ({realforecloseDatesWithAuctions} auction day
+                {realforecloseDatesWithAuctions !== 1 ? 's' : ''})
+              </>
+            )}
+            {' · '}
             <span style={{ color: 'var(--text)' }}>{caseCount}</span> total RealTDM cases found
             {caseCount > upcomingCount && (
               <> ({caseCount - upcomingCount} past sale{caseCount - upcomingCount !== 1 ? 's' : ''} hidden)</>
@@ -524,8 +636,10 @@ export default function LiveDataTab() {
                   <GovEaseCard key={feedItemKey(item)} listing={item.listing} />
                 ) : item.kind === 'bid4assets' ? (
                   <Bid4AssetsCard key={feedItemKey(item)} listing={item.listing} />
-                ) : (
+                ) : item.kind === 'sri' ? (
                   <SriCard key={feedItemKey(item)} listing={item.listing} />
+                ) : (
+                  <RealForecloseCard key={feedItemKey(item)} listing={item.listing} />
                 )
               )}
             </div>
@@ -856,6 +970,114 @@ function SriCard({ listing }: { listing: SriListing }) {
             }}
           >
             VIEW ON SRI →
+          </a>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function RealForecloseCard({ listing }: { listing: RealForecloseListing }) {
+  return (
+    <article
+      className="rounded-md p-4 transition-all"
+      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-dim)')}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+    >
+      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <p className="font-mono text-xs" style={{ color: '#5a9fe8' }}>
+              {listing.county.toUpperCase()} · FL · REALFORECLOSE
+            </p>
+            {listing.auctionType && listing.auctionType !== '—' && (
+              <span
+                className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
+                style={{
+                  background: 'rgba(90,159,232,0.12)',
+                  color: '#5a9fe8',
+                  border: '1px solid rgba(90,159,232,0.25)',
+                }}
+              >
+                {listing.auctionType}
+              </span>
+            )}
+          </div>
+          <p className="text-sm font-medium leading-snug" style={{ color: 'var(--text)' }}>
+            {listing.address}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 mt-3">
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                COUNTY
+              </p>
+              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                {listing.county}
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                STATE
+              </p>
+              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                {listing.state}
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                CASE NUMBER
+              </p>
+              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                {listing.caseNumber}
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                PARCEL ID
+              </p>
+              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                {listing.parcelId}
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                AUCTION DATE & TIME
+              </p>
+              <p className="font-mono text-xs mt-0.5">{listing.auctionDateTime}</p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                ASSESSED VALUE
+              </p>
+              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                {listing.assessedValue != null ? fmt(listing.assessedValue) : '—'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+          <div className="text-right">
+            <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+              OPENING BID
+            </p>
+            <p className="font-display text-2xl tracking-wide" style={{ color: 'var(--gold)' }}>
+              {listing.openingBid != null ? fmt(listing.openingBid) : '—'}
+            </p>
+          </div>
+          <a
+            href={REALFORECLOSE_HOME_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
+            style={{
+              background: 'var(--gold-glow)',
+              border: '1px solid rgba(201,168,76,0.35)',
+              color: 'var(--gold)',
+            }}
+          >
+            VIEW ON REALFORECLOSE →
           </a>
         </div>
       </div>
