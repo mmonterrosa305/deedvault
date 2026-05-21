@@ -1,19 +1,18 @@
 /**
- * Miami-Dade RealForeclose auction preview — "Auctions Waiting" (Area W).
- * @see https://miamidade.realforeclose.com
+ * Florida RealForeclose auction preview — "Auctions Waiting" (Area W) per county subdomain.
+ * @see https://www.realforeclose.com
  */
 
 import { isUpcomingSale } from '@/lib/realtdm'
 
-export const REALFORECLOSE_HOME_URL = 'https://miamidade.realforeclose.com'
-export const REALFORECLOSE_PREVIEW_URL = `${REALFORECLOSE_HOME_URL}/index.cfm?zaction=AUCTION&Zmethod=PREVIEW`
+export const REALFORECLOSE_HOME_URL = 'https://www.realforeclose.com'
 
-/** Typical Miami-Dade online tax deed auction start (not always listed on preview cards). */
+/** Typical Florida online tax deed auction start when not listed on preview cards. */
 const DEFAULT_AUCTION_TIME = '9:00 AM ET'
 
-const ORIGIN = REALFORECLOSE_HOME_URL
 const DAYS_AHEAD = 90
 const PAGE_SIZE_HINT = 10
+const DATE_CONCURRENCY = 4
 
 const FETCH_HEADERS = {
   'User-Agent':
@@ -22,6 +21,38 @@ const FETCH_HEADERS = {
   'Accept-Language': 'en-US,en;q=0.9',
   'X-Requested-With': 'XMLHttpRequest',
 }
+
+export const FL_REALFORECLOSE_COUNTIES = [
+  { key: 'miamidade', name: 'Miami-Dade', subdomain: 'miamidade' },
+  { key: 'broward', name: 'Broward', subdomain: 'broward' },
+  { key: 'palmbeach', name: 'Palm Beach', subdomain: 'pbcgov' },
+  { key: 'hillsborough', name: 'Hillsborough', subdomain: 'hillsborough' },
+  { key: 'pinellas', name: 'Pinellas', subdomain: 'pinellas' },
+  { key: 'polk', name: 'Polk', subdomain: 'polk' },
+  { key: 'volusia', name: 'Volusia', subdomain: 'volusia' },
+  { key: 'marion', name: 'Marion', subdomain: 'marion' },
+  { key: 'lake', name: 'Lake', subdomain: 'lake' },
+  { key: 'osceola', name: 'Osceola', subdomain: 'osceola' },
+  { key: 'brevard', name: 'Brevard', subdomain: 'brevard' },
+  { key: 'pasco', name: 'Pasco', subdomain: 'pasco' },
+  { key: 'manatee', name: 'Manatee', subdomain: 'manatee' },
+  { key: 'sarasota', name: 'Sarasota', subdomain: 'sarasota' },
+  { key: 'charlotte', name: 'Charlotte', subdomain: 'charlotte' },
+  { key: 'lee', name: 'Lee', subdomain: 'lee' },
+  { key: 'collier', name: 'Collier', subdomain: 'collier' },
+  { key: 'stlucie', name: 'St. Lucie', subdomain: 'stlucie' },
+  { key: 'indianriver', name: 'Indian River', subdomain: 'indianriver' },
+  { key: 'seminole', name: 'Seminole', subdomain: 'seminole' },
+  { key: 'orange', name: 'Orange', subdomain: 'orange' },
+  { key: 'alachua', name: 'Alachua', subdomain: 'alachua' },
+  { key: 'duval', name: 'Duval', subdomain: 'duval' },
+  { key: 'escambia', name: 'Escambia', subdomain: 'escambia' },
+  { key: 'leon', name: 'Leon', subdomain: 'leon' },
+] as const
+
+export type RealForecloseCounty = (typeof FL_REALFORECLOSE_COUNTIES)[number]
+
+export const FL_REALFORECLOSE_COUNTY_COUNT = FL_REALFORECLOSE_COUNTIES.length
 
 export type RealForecloseListing = {
   id: string
@@ -42,9 +73,24 @@ export type RealForecloseListing = {
   auctionUrl: string
 }
 
+export type RealForecloseCountyCount = {
+  countyKey: string
+  county: string
+  count: number
+}
+
 type LoadJson = {
   retHTML?: string
   rlist?: string
+}
+
+function countyOrigin(county: RealForecloseCounty): string {
+  return `https://${county.subdomain}.realforeclose.com`
+}
+
+function previewUrl(origin: string, auctionDateMmDdYyyy: string): string {
+  const enc = encodeURIComponent(auctionDateMmDdYyyy)
+  return `${origin}/index.cfm?zaction=AUCTION&Zmethod=PREVIEW&AUCTIONDATE=${enc}`
 }
 
 class ForecloseSession {
@@ -82,11 +128,6 @@ class ForecloseSession {
     if (!res.ok) throw new Error(`RealForeclose request failed (${res.status})`)
     return res.text()
   }
-}
-
-function previewUrl(auctionDateMmDdYyyy: string): string {
-  const enc = encodeURIComponent(auctionDateMmDdYyyy)
-  return `${REALFORECLOSE_PREVIEW_URL}&AUCTIONDATE=${enc}`
 }
 
 function formatMmDdYyyy(d: Date): string {
@@ -177,6 +218,8 @@ function buildAddress(fields: Record<string, string>): string {
 
 function parseAuctionBlocks(
   html: string,
+  county: RealForecloseCounty,
+  origin: string,
   auctionDateMmDdYyyy: string,
   displayDate: string
 ): RealForecloseListing[] {
@@ -193,11 +236,12 @@ function parseAuctionBlocks(
     const caseNumber = (fields['Case #'] ?? fields['Case Number'] ?? '').trim()
     const parcelId = (fields['Parcel ID'] ?? '').trim()
     const auctionType = (fields['Auction Type'] ?? '').trim()
+    const caseSlug = caseNumber.replace(/\s+/g, '') || parcelId || auctionId
 
     listings.push({
-      id: `rf-${auctionId}-${caseNumber.replace(/\s+/g, '') || parcelId}`,
-      county: 'Miami-Dade',
-      countyKey: 'miamidade',
+      id: `rf-${county.key}-${auctionId}-${caseSlug}`,
+      county: county.name,
+      countyKey: county.key,
       state: 'FL',
       caseNumber: caseNumber || '—',
       openingBid: parseMoney(fields['Opening Bid'] ?? ''),
@@ -210,7 +254,7 @@ function parseAuctionBlocks(
       auctionType: auctionType || '—',
       certificateNumber: fields['Certificate #']?.trim() || null,
       auctionId,
-      auctionUrl: `${ORIGIN}/index.cfm?zaction=auction&zmethod=details&AID=${auctionId}`,
+      auctionUrl: `${origin}/index.cfm?zaction=auction&zmethod=details&AID=${auctionId}`,
     })
   }
 
@@ -219,9 +263,11 @@ function parseAuctionBlocks(
 
 async function fetchWaitingForDate(
   session: ForecloseSession,
+  county: RealForecloseCounty,
+  origin: string,
   auctionDateMmDdYyyy: string
 ): Promise<RealForecloseListing[]> {
-  const preview = previewUrl(auctionDateMmDdYyyy)
+  const preview = previewUrl(origin, auctionDateMmDdYyyy)
   const previewHtml = await session.fetchText(preview)
   const albMatch = previewHtml.match(/id="ALB"[^>]*>([^<]+)/i)
   const alb = albMatch?.[1]?.trim()
@@ -232,11 +278,11 @@ async function fetchWaitingForDate(
   const tx = () => String(Date.now())
 
   await session.fetchText(
-    `${ORIGIN}/index.cfm?zaction=AUCTION&ZMETHOD=UPDATE&FNC=RESET&ALB=${encAlb}&tx=${tx()}`,
+    `${origin}/index.cfm?zaction=AUCTION&ZMETHOD=UPDATE&FNC=RESET&ALB=${encAlb}&tx=${tx()}`,
     preview
   )
   await session.fetchText(
-    `${ORIGIN}/index.cfm?zaction=AUCTION&Zmethod=UPDATE&FNC=LOAD&AREA=R&PageDir=0&doR=1&tx=${tx()}&bypassPage=1`,
+    `${origin}/index.cfm?zaction=AUCTION&Zmethod=UPDATE&FNC=LOAD&AREA=R&PageDir=0&doR=1&tx=${tx()}&bypassPage=1`,
     preview
   )
 
@@ -245,7 +291,7 @@ async function fetchWaitingForDate(
 
   for (let page = 1; page <= 12; page++) {
     const loadRaw = await session.fetchText(
-      `${ORIGIN}/index.cfm?zaction=AUCTION&Zmethod=UPDATE&FNC=LOAD&AREA=W&PageDir=0&doR=1&tx=${tx()}&bypassPage=${page}`,
+      `${origin}/index.cfm?zaction=AUCTION&Zmethod=UPDATE&FNC=LOAD&AREA=W&PageDir=0&doR=1&tx=${tx()}&bypassPage=${page}`,
       preview
     )
     const payload = extractJsonPayload(loadRaw)
@@ -264,7 +310,13 @@ async function fetchWaitingForDate(
   }
 
   const combined = allHtml.join('')
-  const listings = parseAuctionBlocks(combined, auctionDateMmDdYyyy, displayDate)
+  const listings = parseAuctionBlocks(
+    combined,
+    county,
+    origin,
+    auctionDateMmDdYyyy,
+    displayDate
+  )
   const isoDate = isoDateFromMmDdYyyy(auctionDateMmDdYyyy)
   return listings.filter(l => isUpcomingSale(isoDate))
 }
@@ -281,43 +333,104 @@ function upcomingDates(): string[] {
   return dates
 }
 
-/** Fetch upcoming Miami-Dade tax deed auctions from RealForeclose preview pages. */
-export async function fetchMiamiDadeRealForecloseListings(): Promise<{
-  listings: RealForecloseListing[]
-  datesScanned: number
-  datesWithAuctions: number
-}> {
+function buildCountyCounts(listings: RealForecloseListing[]): RealForecloseCountyCount[] {
+  const counts = new Map<string, RealForecloseCountyCount>()
+  for (const row of listings) {
+    const existing = counts.get(row.countyKey)
+    if (existing) {
+      existing.count += 1
+    } else {
+      counts.set(row.countyKey, {
+        countyKey: row.countyKey,
+        county: row.county,
+        count: 1,
+      })
+    }
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count || a.county.localeCompare(b.county))
+}
+
+async function fetchCountyListings(county: RealForecloseCounty): Promise<RealForecloseListing[]> {
+  const origin = countyOrigin(county)
   const dates = upcomingDates()
   const byId = new Map<string, RealForecloseListing>()
-  let datesWithAuctions = 0
 
-  const concurrency = 4
-  for (let i = 0; i < dates.length; i += concurrency) {
-    const batch = dates.slice(i, i + concurrency)
+  for (let i = 0; i < dates.length; i += DATE_CONCURRENCY) {
+    const batch = dates.slice(i, i + DATE_CONCURRENCY)
     const results = await Promise.all(
       batch.map(async date => {
         const session = new ForecloseSession()
         try {
-          return await fetchWaitingForDate(session, date)
+          return await fetchWaitingForDate(session, county, origin, date)
         } catch {
           return [] as RealForecloseListing[]
         }
       })
     )
     for (const list of results) {
-      if (list.length > 0) datesWithAuctions++
       for (const row of list) {
         byId.set(row.id, row)
       }
     }
   }
 
+  return [...byId.values()]
+}
+
+/** Fetch upcoming Florida tax deed auctions from all RealForeclose county sites (90-day preview scan). */
+export async function fetchFloridaRealForecloseListings(): Promise<{
+  listings: RealForecloseListing[]
+  datesScanned: number
+  datesWithAuctions: number
+  countyCounts: RealForecloseCountyCount[]
+  countiesScanned: number
+  countiesWithListings: number
+}> {
+  const dates = upcomingDates()
+
+  const countyResults = await Promise.all(
+    FL_REALFORECLOSE_COUNTIES.map(async county => {
+      try {
+        const listings = await fetchCountyListings(county)
+        return { county, listings, err: false as const }
+      } catch {
+        return { county, listings: [] as RealForecloseListing[], err: true as const }
+      }
+    })
+  )
+
+  const byId = new Map<string, RealForecloseListing>()
+  let datesWithAuctions = 0
+  const datesSeen = new Set<string>()
+
+  for (const { listings } of countyResults) {
+    for (const row of listings) {
+      byId.set(row.id, row)
+      datesSeen.add(row.auctionDate)
+    }
+  }
+  datesWithAuctions = datesSeen.size
+
   const listings = [...byId.values()].sort((a, b) => {
     const da = Date.parse(a.auctionDate)
     const db = Date.parse(b.auctionDate)
     if (!Number.isNaN(da) && !Number.isNaN(db) && da !== db) return da - db
+    if (a.county !== b.county) return a.county.localeCompare(b.county)
     return a.caseNumber.localeCompare(b.caseNumber)
   })
 
-  return { listings, datesScanned: dates.length, datesWithAuctions }
+  const countyCounts = buildCountyCounts(listings)
+  const countiesWithListings = countyCounts.filter(c => c.count > 0).length
+
+  return {
+    listings,
+    datesScanned: dates.length,
+    datesWithAuctions,
+    countyCounts,
+    countiesScanned: FL_REALFORECLOSE_COUNTY_COUNT,
+    countiesWithListings,
+  }
 }
+
+/** @deprecated Use fetchFloridaRealForecloseListings */
+export const fetchMiamiDadeRealForecloseListings = fetchFloridaRealForecloseListings

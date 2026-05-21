@@ -20,7 +20,7 @@ import {
 } from '@/lib/govease'
 import { SRI_HOME_URL, type SriListing } from '@/lib/sri'
 import {
-  REALFORECLOSE_HOME_URL,
+  type RealForecloseCountyCount,
   type RealForecloseListing,
 } from '@/lib/realforeclose'
 import { fmt } from '@/lib/listings'
@@ -65,6 +65,9 @@ type RealForecloseResponse = {
   listings: RealForecloseListing[]
   datesScanned?: number
   datesWithAuctions?: number
+  countyCounts?: RealForecloseCountyCount[]
+  countiesScanned?: number
+  countiesWithListings?: number
   error?: string
 }
 
@@ -100,6 +103,9 @@ export default function LiveDataTab() {
   const [loadingSri, setLoadingSri] = useState(false)
   const [loadingRealForeclose, setLoadingRealForeclose] = useState(false)
   const [realforecloseDatesWithAuctions, setRealforecloseDatesWithAuctions] = useState(0)
+  const [realforecloseCountyCounts, setRealforecloseCountyCounts] = useState<
+    RealForecloseCountyCount[]
+  >([])
   const [bid4assetsCalendarCount, setBid4assetsCalendarCount] = useState(0)
   const [bid4assetsSearchCount, setBid4assetsSearchCount] = useState(0)
   const [q, setQ] = useState('')
@@ -183,7 +189,14 @@ export default function LiveDataTab() {
         const data = (await res.json()) as RealForecloseResponse
         if (!res.ok) throw new Error(data.error ?? 'RealForeclose failed')
         const count = data.listings?.length ?? 0
-        console.log(`RealForeclose fetch complete: ${count} listings`)
+        const byCounty = (data.countyCounts ?? [])
+          .filter(c => c.count > 0)
+          .map(c => `${c.county} ${c.count}`)
+          .join(' · ')
+        console.log(
+          `RealForeclose fetch complete: ${count} listings` +
+            (byCounty ? ` (${byCounty})` : '')
+        )
         return { ...data, ok: true }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'RealForeclose fetch failed'
@@ -194,6 +207,9 @@ export default function LiveDataTab() {
           listings: [],
           datesScanned: 0,
           datesWithAuctions: 0,
+          countyCounts: [],
+          countiesScanned: 0,
+          countiesWithListings: 0,
         }
       } finally {
         if (!cancelled) setLoadingRealForeclose(false)
@@ -242,6 +258,7 @@ export default function LiveDataTab() {
       setBid4assetsCalendarCount(0)
       setBid4assetsSearchCount(0)
       setRealforecloseDatesWithAuctions(0)
+      setRealforecloseCountyCounts([])
 
       setLoadingParcels(true)
 
@@ -298,6 +315,7 @@ export default function LiveDataTab() {
       setSriListings(sriResult.listings ?? [])
       setRealforecloseListings(realforecloseResult.listings ?? [])
       setRealforecloseDatesWithAuctions(realforecloseResult.datesWithAuctions ?? 0)
+      setRealforecloseCountyCounts(realforecloseResult.countyCounts ?? [])
 
       const allCases = countyResults.flatMap(r => r.cases)
       const totalListed = countyResults.reduce((n, r) => n + r.listed, 0)
@@ -397,6 +415,13 @@ export default function LiveDataTab() {
   const bid4assetsCount = bid4assetsListings.length
   const sriCount = sriListings.length
   const realforecloseCount = realforecloseListings.length
+  const realforecloseCountySummary = useMemo(() => {
+    if (realforecloseCountyCounts.length === 0) return ''
+    return realforecloseCountyCounts
+      .filter(c => c.count > 0)
+      .map(c => `${c.county} ${c.count}`)
+      .join(' · ')
+  }, [realforecloseCountyCounts])
   const totalDisplayed = feedItems.length
 
   const filtered = useMemo(() => {
@@ -485,7 +510,8 @@ export default function LiveDataTab() {
         <p className="font-mono text-xs mt-2 max-w-2xl" style={{ color: 'var(--muted)' }}>
           Upcoming resale auctions (30-day and full advertisement) from Florida RealTDM counties,
           GovEase schedule and live parcels (10 FL counties), Bid4Assets tax sales (10 MI counties),
-          SRI tax deed auctions (10 MI counties), and Miami-Dade RealForeclose waiting auctions.
+          SRI tax deed auctions (10 MI counties), and Florida RealForeclose waiting auctions (25
+          counties).
           Miami-Dade parcels merge with county GIS when
           the parcel number matches. Only
           cases with a sale date today or later are shown.
@@ -597,7 +623,24 @@ export default function LiveDataTab() {
                 {realforecloseDatesWithAuctions !== 1 ? 's' : ''})
               </>
             )}
-            {' · '}
+          </p>
+          {realforecloseCountySummary && (
+            <p
+              className="font-mono text-[10px] mb-3 px-3 leading-relaxed"
+              style={{ color: 'var(--muted)' }}
+            >
+              <span style={{ color: 'var(--gold)' }}>RealForeclose by county:</span>{' '}
+              {realforecloseCountySummary}
+            </p>
+          )}
+          <p
+            className="font-mono text-xs mb-3 px-3 py-2 rounded"
+            style={{
+              color: 'var(--muted)',
+              background: 'var(--panel)',
+              border: '1px solid var(--border)',
+            }}
+          >
             <span style={{ color: 'var(--text)' }}>{caseCount}</span> total RealTDM cases found
             {caseCount > upcomingCount && (
               <> ({caseCount - upcomingCount} past sale{caseCount - upcomingCount !== 1 ? 's' : ''} hidden)</>
@@ -1067,7 +1110,7 @@ function RealForecloseCard({ listing }: { listing: RealForecloseListing }) {
             </p>
           </div>
           <a
-            href={REALFORECLOSE_HOME_URL}
+            href={listing.auctionUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
