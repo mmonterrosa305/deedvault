@@ -10,6 +10,10 @@ import {
   FL_REALTDM_COUNTY_COUNT,
   type RealTdmCase,
 } from '@/lib/realtdm'
+import {
+  GOVEASE_HOME_URL,
+  type GovEaseListing,
+} from '@/lib/govease'
 import { fmt } from '@/lib/listings'
 import { mergeLiveData, type LiveDataRecord } from '@/lib/live-data-merge'
 import LivePropertyModal from '@/components/listing/LivePropertyModal'
@@ -28,16 +32,35 @@ type CountyCasesResponse = {
   error?: string
 }
 
+type GovEaseResponse = {
+  listings: GovEaseListing[]
+  sheetCount?: number
+  liveCount?: number
+  error?: string
+}
+
+type FeedItem =
+  | { kind: 'realtdm'; record: LiveDataRecord }
+  | { kind: 'govease'; listing: GovEaseListing }
+
+function feedItemKey(item: FeedItem): string {
+  return item.kind === 'realtdm' ? caseUniqueId(item.record.case) : item.listing.id
+}
+
 export default function LiveDataTab() {
   const [records, setRecords] = useState<LiveDataRecord[]>([])
+  const [goveaseListings, setGovEaseListings] = useState<GovEaseListing[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [propertySource, setPropertySource] = useState<'primary' | 'fallback' | null>(null)
   const [caseCount, setCaseCount] = useState(0)
   const [detailsEnriched, setDetailsEnriched] = useState(0)
+  const [goveaseSheetCount, setGovEaseSheetCount] = useState(0)
+  const [goveaseLiveCount, setGovEaseLiveCount] = useState(0)
   const [loadedCountyCount, setLoadedCountyCount] = useState(0)
   const [loadingCountyNames, setLoadingCountyNames] = useState<string[]>([])
   const [loadingParcels, setLoadingParcels] = useState(false)
+  const [loadingGovEase, setLoadingGovEase] = useState(false)
   const [q, setQ] = useState('')
   const [selected, setSelected] = useState<LiveDataRecord | null>(null)
 
@@ -72,17 +95,43 @@ export default function LiveDataTab() {
       }
     }
 
+    async function loadGovEase(): Promise<GovEaseResponse & { ok: boolean }> {
+      setLoadingGovEase(true)
+      try {
+        const res = await fetch('/api/govease')
+        const data = (await res.json()) as GovEaseResponse
+        if (!res.ok) throw new Error(data.error ?? 'GovEase failed')
+        if (!cancelled) {
+          setGovEaseListings(data.listings ?? [])
+          setGovEaseSheetCount(data.sheetCount ?? 0)
+          setGovEaseLiveCount(data.liveCount ?? 0)
+        }
+        return { ...data, ok: true }
+      } catch (err) {
+        if (!cancelled) setGovEaseListings([])
+        const message = err instanceof Error ? err.message : 'GovEase fetch failed'
+        return { ok: false, error: message, listings: [], sheetCount: 0, liveCount: 0 }
+      } finally {
+        if (!cancelled) setLoadingGovEase(false)
+      }
+    }
+
     async function load() {
       setLoading(true)
       setError(null)
       setLoadedCountyCount(0)
       setLoadingCountyNames([])
       setLoadingParcels(false)
+      setLoadingGovEase(true)
       setRecords([])
+      setGovEaseListings([])
       setCaseCount(0)
       setDetailsEnriched(0)
+      setGovEaseSheetCount(0)
+      setGovEaseLiveCount(0)
 
       const propsPromise = fetch('/api/miami-dade/properties')
+      const goveasePromise = loadGovEase()
 
       const countyResults = await Promise.all(
         FL_REALTDM_COUNTIES.map(county => loadCounty(county))
@@ -106,6 +155,8 @@ export default function LiveDataTab() {
         propsErr = 'Failed to load parcel data'
       }
 
+      const goveaseResult = await goveasePromise
+
       if (cancelled) return
 
       const allCases = countyResults.flatMap(r => r.cases)
@@ -119,13 +170,17 @@ export default function LiveDataTab() {
 
       const warnings: string[] = []
       if (failedCounties > 0) {
-        warnings.push(`${failedCounties} county source${failedCounties !== 1 ? 's' : ''} unavailable`)
+        warnings.push(`${failedCounties} RealTDM county source${failedCounties !== 1 ? 's' : ''} unavailable`)
+      }
+      if (!goveaseResult.ok) {
+        warnings.push('GovEase schedule unavailable')
       }
       if (!propsOk) {
         warnings.push(`Property data unavailable: ${propsErr}`)
       }
-      if (allCases.length === 0 && failedCounties === FL_REALTDM_COUNTY_COUNT) {
-        setError('Failed to load tax deed cases from all counties')
+      const goveaseTotal = goveaseResult.listings?.length ?? 0
+      if (allCases.length === 0 && failedCounties === FL_REALTDM_COUNTY_COUNT && goveaseTotal === 0) {
+        setError('Failed to load tax deed cases from all sources')
       } else if (warnings.length > 0) {
         setError(warnings.join(' · '))
       }
@@ -140,23 +195,62 @@ export default function LiveDataTab() {
     }
   }, [])
 
+  const feedItems = useMemo((): FeedItem[] => {
+    const items: FeedItem[] = [
+      ...records.map(record => ({ kind: 'realtdm' as const, record })),
+      ...goveaseListings.map(listing => ({ kind: 'govease' as const, listing })),
+    ]
+    items.sort((a, b) => {
+      const dateA =
+        a.kind === 'realtdm' ? Date.parse(a.record.case.saleDate) : Date.parse(a.listing.saleDate)
+      const dateB =
+        b.kind === 'realtdm' ? Date.parse(b.record.case.saleDate) : Date.parse(b.listing.saleDate)
+      const validA = !Number.isNaN(dateA)
+      const validB = !Number.isNaN(dateB)
+      if (validA && validB && dateA !== dateB) return dateA - dateB
+      if (validA && !validB) return -1
+      if (!validA && validB) return 1
+      const countyA = a.kind === 'realtdm' ? a.record.case.county : a.listing.county
+      const countyB = b.kind === 'realtdm' ? b.record.case.county : b.listing.county
+      return countyA.localeCompare(countyB)
+    })
+    return items
+  }, [records, goveaseListings])
+
   const upcomingCount = records.length
+  const goveaseCount = goveaseListings.length
+  const totalDisplayed = feedItems.length
 
   const filtered = useMemo(() => {
-    if (!q) return records
+    if (!q) return feedItems
     const lq = q.toLowerCase()
-    return records.filter(r => {
-      const c = r.case
+    return feedItems.filter(item => {
+      if (item.kind === 'realtdm') {
+        const r = item.record
+        const c = r.case
+        return (
+          c.caseNumber.toLowerCase().includes(lq) ||
+          c.county.toLowerCase().includes(lq) ||
+          c.parcelNumber.toLowerCase().includes(lq) ||
+          c.status.toLowerCase().includes(lq) ||
+          r.displayAddress.toLowerCase().includes(lq) ||
+          (r.displayOwner?.toLowerCase().includes(lq) ?? false)
+        )
+      }
+      const g = item.listing
       return (
-        c.caseNumber.toLowerCase().includes(lq) ||
-        c.county.toLowerCase().includes(lq) ||
-        c.parcelNumber.toLowerCase().includes(lq) ||
-        c.status.toLowerCase().includes(lq) ||
-        r.displayAddress.toLowerCase().includes(lq) ||
-        (r.displayOwner?.toLowerCase().includes(lq) ?? false)
+        g.county.toLowerCase().includes(lq) ||
+        g.address.toLowerCase().includes(lq) ||
+        (g.parcelNumber?.toLowerCase().includes(lq) ?? false) ||
+        (g.saleType?.toLowerCase().includes(lq) ?? false) ||
+        g.saleDate.toLowerCase().includes(lq)
       )
     })
-  }, [records, q])
+  }, [feedItems, q])
+
+  const progressTotal = FL_REALTDM_COUNTY_COUNT + 1
+  const progressLoaded =
+    loadedCountyCount + (loadingGovEase ? 0 : 1)
 
   return (
     <div className="px-4 sm:px-6 py-6 max-w-6xl mx-auto">
@@ -165,15 +259,17 @@ export default function LiveDataTab() {
       )}
       <div className="mb-6">
         <p className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
-          FLORIDA · 17 REALTDM COUNTIES
+          FLORIDA · REALTDM + GOVEASE
         </p>
         <h2 className="font-display text-3xl tracking-wide mt-1" style={{ color: 'var(--text)' }}>
           LIVE TAX DEED CASES
         </h2>
         <p className="font-mono text-xs mt-2 max-w-2xl" style={{ color: 'var(--muted)' }}>
-          Upcoming resale auctions (30-day and full advertisement) from all Florida RealTDM
-          counties, fetched in parallel. Miami-Dade parcels are merged with county GIS when the
-          parcel number matches. Only cases with a sale date today or in the future are shown.
+          Upcoming resale auctions (30-day and full advertisement) from Florida RealTDM counties,
+          plus GovEase schedule and live parcel listings for Orange, Alachua, Hillsborough,
+          Sarasota, Volusia, Pinellas, Polk, Lake, Marion, and Osceola. Miami-Dade parcels merge
+          with county GIS when the parcel number matches. Only cases with a sale date today or
+          later are shown.
           {propertySource === 'fallback' &&
             ' (Miami-Dade ArcGIS using county backup endpoint.)'}
         </p>
@@ -211,14 +307,18 @@ export default function LiveDataTab() {
 
       {loading && (
         <LiveDataLoadProgress
-          loadedCount={loadedCountyCount}
-          totalCount={FL_REALTDM_COUNTY_COUNT}
-          loadingCountyNames={loadingCountyNames}
+          loadedCount={progressLoaded}
+          totalCount={progressTotal}
+          loadingCountyNames={
+            loadingGovEase
+              ? [...loadingCountyNames, 'GovEase']
+              : loadingCountyNames
+          }
           loadingParcels={loadingParcels}
         />
       )}
 
-      {error && !loading && records.length === 0 && (
+      {error && !loading && totalDisplayed === 0 && (
         <div
           className="rounded-md px-4 py-8 text-center"
           style={{ background: 'var(--panel)', border: '1px solid rgba(232,122,90,0.3)' }}
@@ -227,9 +327,9 @@ export default function LiveDataTab() {
         </div>
       )}
 
-      {!loading && (caseCount > 0 || upcomingCount > 0 || !error) && (
+      {!loading && (caseCount > 0 || totalDisplayed > 0 || !error) && (
         <>
-          {error && (caseCount > 0 || upcomingCount > 0) && (
+          {error && totalDisplayed > 0 && (
             <p className="font-mono text-xs mb-3" style={{ color: '#e87a5a' }}>{error}</p>
           )}
           <p
@@ -240,9 +340,19 @@ export default function LiveDataTab() {
               border: '1px solid var(--border)',
             }}
           >
-            <span style={{ color: 'var(--gold)' }}>{upcomingCount}</span> upcoming sale
-            {upcomingCount !== 1 ? 's' : ''} shown ·{' '}
-            <span style={{ color: 'var(--text)' }}>{caseCount}</span> total cases found on RealTDM
+            <span style={{ color: 'var(--gold)' }}>{upcomingCount}</span> RealTDM upcoming
+            {upcomingCount !== 1 ? '' : ''} ·{' '}
+            <span style={{ color: 'var(--gold)' }}>{goveaseCount}</span> GovEase listing
+            {goveaseCount !== 1 ? 's' : ''}
+            {goveaseCount > 0 && (
+              <>
+                {' '}
+                ({goveaseLiveCount} live parcel{goveaseLiveCount !== 1 ? 's' : ''}
+                {goveaseSheetCount > 0 ? ` · ${goveaseSheetCount} scheduled` : ''})
+              </>
+            )}
+            {' · '}
+            <span style={{ color: 'var(--text)' }}>{caseCount}</span> total RealTDM cases found
             {caseCount > upcomingCount && (
               <> ({caseCount - upcomingCount} past sale{caseCount - upcomingCount !== 1 ? 's' : ''} hidden)</>
             )}
@@ -259,146 +369,265 @@ export default function LiveDataTab() {
           {filtered.length === 0 ? (
             <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
               <p className="font-display text-3xl">
-                {upcomingCount === 0 ? 'NO UPCOMING SALES' : 'NO MATCHES'}
+                {totalDisplayed === 0 ? 'NO UPCOMING SALES' : 'NO MATCHES'}
               </p>
-              {upcomingCount === 0 && caseCount > 0 && (
+              {totalDisplayed === 0 && caseCount > 0 && (
                 <p className="font-mono text-xs mt-2">
-                  All {caseCount} cases have sale dates in the past.
+                  All {caseCount} RealTDM cases have sale dates in the past.
                 </p>
               )}
             </div>
           ) : (
             <div className="space-y-3">
-              {filtered.map(r => (
-                <article
-                  key={caseUniqueId(r.case)}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelected(r)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      setSelected(r)
-                    }
-                  }}
-                  className="rounded-md p-4 transition-all cursor-pointer"
-                  style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-dim)')}
-                  onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-                >
-                  <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <p className="font-mono text-xs" style={{ color: '#5a9fe8' }}>
-                          {r.case.county.toUpperCase()} · FL
-                        </p>
-                        <span
-                          className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
-                          style={{
-                            background: 'var(--gold-glow)',
-                            color: 'var(--gold)',
-                            border: '1px solid rgba(201,168,76,0.25)',
-                          }}
-                        >
-                          {r.case.status}
-                        </span>
-                        {r.property && (
-                          <span
-                            className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
-                            style={{
-                              background: 'rgba(58,170,110,0.12)',
-                              color: '#3aaa6e',
-                              border: '1px solid rgba(58,170,110,0.25)',
-                            }}
-                          >
-                            PARCEL MATCHED
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm font-medium leading-snug" style={{ color: 'var(--text)' }}>
-                        {r.displayAddress}
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 mt-3">
-                        <div>
-                          <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
-                            CASE NUMBER
-                          </p>
-                          <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
-                            {r.case.caseNumber}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
-                            PARCEL NUMBER
-                          </p>
-                          <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
-                            {r.case.parcelNumber}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
-                            SALE DATE
-                          </p>
-                          <p className="font-mono text-xs mt-0.5">{r.case.saleDate}</p>
-                        </div>
-                        {r.displayOwner && (
-                          <div>
-                            <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
-                              OWNER (ARC GIS)
-                            </p>
-                            <p className="text-xs mt-0.5" style={{ color: 'var(--text)' }}>
-                              {r.displayOwner}
-                            </p>
-                          </div>
-                        )}
-                        {r.assessedValue != null && (
-                          <div>
-                            <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
-                              TOTAL ASSESSED
-                            </p>
-                            <p className="font-mono text-xs mt-0.5">{fmt(r.assessedValue)}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                      <div className="text-right">
-                        <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
-                          OPENING BID
-                        </p>
-                        <p className="font-display text-2xl tracking-wide" style={{ color: 'var(--gold)' }}>
-                          {r.case.openingBid != null ? fmt(r.case.openingBid) : '—'}
-                        </p>
-                      </div>
-                      <a
-                        href={
-                          r.case.countyKey === 'miamidade'
-                            ? REALFORECLOSE_URL
-                            : `${countyBaseUrl({ key: r.case.countyKey, name: r.case.county, subdomain: r.case.subdomain })}/public/cases/list`
-                        }
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={e => e.stopPropagation()}
-                        className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
-                        style={{
-                          background: 'var(--gold-glow)',
-                          border: '1px solid rgba(201,168,76,0.35)',
-                          color: 'var(--gold)',
-                        }}
-                      >
-                        {r.case.countyKey === 'miamidade'
-                          ? 'VIEW ON REALFORECLOSE →'
-                          : 'VIEW ON REALTDM →'}
-                      </a>
-                    </div>
-                  </div>
-                </article>
-              ))}
+              {filtered.map(item =>
+                item.kind === 'realtdm' ? (
+                  <RealTdmCard
+                    key={feedItemKey(item)}
+                    record={item.record}
+                    onSelect={() => setSelected(item.record)}
+                  />
+                ) : (
+                  <GovEaseCard key={feedItemKey(item)} listing={item.listing} />
+                )
+              )}
             </div>
           )}
         </>
       )}
     </div>
+  )
+}
+
+function RealTdmCard({
+  record,
+  onSelect,
+}: {
+  record: LiveDataRecord
+  onSelect: () => void
+}) {
+  const r = record
+  return (
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
+      className="rounded-md p-4 transition-all cursor-pointer"
+      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-dim)')}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+    >
+      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <p className="font-mono text-xs" style={{ color: '#5a9fe8' }}>
+              {r.case.county.toUpperCase()} · FL · REALTDM
+            </p>
+            <span
+              className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
+              style={{
+                background: 'var(--gold-glow)',
+                color: 'var(--gold)',
+                border: '1px solid rgba(201,168,76,0.25)',
+              }}
+            >
+              {r.case.status}
+            </span>
+            {r.property && (
+              <span
+                className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
+                style={{
+                  background: 'rgba(58,170,110,0.12)',
+                  color: '#3aaa6e',
+                  border: '1px solid rgba(58,170,110,0.25)',
+                }}
+              >
+                PARCEL MATCHED
+              </span>
+            )}
+          </div>
+          <p className="text-sm font-medium leading-snug" style={{ color: 'var(--text)' }}>
+            {r.displayAddress}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 mt-3">
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                CASE NUMBER
+              </p>
+              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                {r.case.caseNumber}
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                PARCEL NUMBER
+              </p>
+              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                {r.case.parcelNumber}
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                SALE DATE
+              </p>
+              <p className="font-mono text-xs mt-0.5">{r.case.saleDate}</p>
+            </div>
+            {r.displayOwner && (
+              <div>
+                <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                  OWNER (ARC GIS)
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                  {r.displayOwner}
+                </p>
+              </div>
+            )}
+            {r.assessedValue != null && (
+              <div>
+                <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                  TOTAL ASSESSED
+                </p>
+                <p className="font-mono text-xs mt-0.5">{fmt(r.assessedValue)}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+          <div className="text-right">
+            <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+              OPENING BID
+            </p>
+            <p className="font-display text-2xl tracking-wide" style={{ color: 'var(--gold)' }}>
+              {r.case.openingBid != null ? fmt(r.case.openingBid) : '—'}
+            </p>
+          </div>
+          <a
+            href={
+              r.case.countyKey === 'miamidade'
+                ? REALFORECLOSE_URL
+                : `${countyBaseUrl({ key: r.case.countyKey, name: r.case.county, subdomain: r.case.subdomain })}/public/cases/list`
+            }
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
+            style={{
+              background: 'var(--gold-glow)',
+              border: '1px solid rgba(201,168,76,0.35)',
+              color: 'var(--gold)',
+            }}
+          >
+            {r.case.countyKey === 'miamidade'
+              ? 'VIEW ON REALFORECLOSE →'
+              : 'VIEW ON REALTDM →'}
+          </a>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function GovEaseCard({ listing }: { listing: GovEaseListing }) {
+  const href = GOVEASE_HOME_URL
+  return (
+    <article
+      className="rounded-md p-4 transition-all"
+      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-dim)')}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+    >
+      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <p className="font-mono text-xs" style={{ color: '#5a9fe8' }}>
+              {listing.county.toUpperCase()} · FL · GOVEASE
+            </p>
+            {listing.saleType && (
+              <span
+                className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
+                style={{
+                  background: 'rgba(90,159,232,0.12)',
+                  color: '#5a9fe8',
+                  border: '1px solid rgba(90,159,232,0.25)',
+                }}
+              >
+                {listing.saleType}
+              </span>
+            )}
+            {listing.source === 'liveauction' && (
+              <span
+                className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
+                style={{
+                  background: 'rgba(58,170,110,0.12)',
+                  color: '#3aaa6e',
+                  border: '1px solid rgba(58,170,110,0.25)',
+                }}
+              >
+                LIVE PARCEL
+              </span>
+            )}
+          </div>
+          <p className="text-sm font-medium leading-snug" style={{ color: 'var(--text)' }}>
+            {listing.address}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 mt-3">
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                COUNTY
+              </p>
+              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                {listing.county}
+              </p>
+            </div>
+            {listing.parcelNumber && (
+              <div>
+                <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                  PARCEL NUMBER
+                </p>
+                <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                  {listing.parcelNumber}
+                </p>
+              </div>
+            )}
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                SALE DATE
+              </p>
+              <p className="font-mono text-xs mt-0.5">{listing.saleDate}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+          <div className="text-right">
+            <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+              OPENING BID
+            </p>
+            <p className="font-display text-2xl tracking-wide" style={{ color: 'var(--gold)' }}>
+              {listing.openingBid != null ? fmt(listing.openingBid) : '—'}
+            </p>
+          </div>
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
+            style={{
+              background: 'var(--gold-glow)',
+              border: '1px solid rgba(201,168,76,0.35)',
+              color: 'var(--gold)',
+            }}
+          >
+            VIEW ON GOVEASE →
+          </a>
+        </div>
+      </div>
+    </article>
   )
 }
