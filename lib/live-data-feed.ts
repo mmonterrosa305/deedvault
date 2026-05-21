@@ -218,8 +218,14 @@ export function filterAndSortFeedItems(
   return result
 }
 
-export function collectFeedCounties(items: LiveDataFeedItem[]): string[] {
+export function collectFeedCounties(
+  items: LiveDataFeedItem[],
+  stateFilter: LiveDataStateFilter = 'all'
+): string[] {
   const set = new Set<string>()
-  for (const item of items) set.add(feedItemCounty(item))
+  for (const item of items) {
+    if (stateFilter !== 'all' && feedItemState(item) !== stateFilter) continue
+    set.add(feedItemCounty(item))
+  }
   return [...set].sort((a, b) => a.localeCompare(b))
 }

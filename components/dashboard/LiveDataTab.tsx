@@ -185,7 +185,10 @@ export default function LiveDataTab() {
       console.log('Fetching RealForeclose...')
       setLoadingRealForeclose(true)
       try {
-        const res = await fetch('/api/realforeclose', { cache: 'no-store' })
+        const res = await fetch('/api/realforeclose', {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(300_000),
+        })
         const data = (await res.json()) as RealForecloseResponse
         if (!res.ok) throw new Error(data.error ?? 'RealForeclose failed')
         const count = data.listings?.length ?? 0
@@ -385,13 +388,16 @@ export default function LiveDataTab() {
     ]
   }, [records, goveaseListings, bid4assetsListings, sriListings, realforecloseListings])
 
-  const availableCounties = useMemo(() => collectFeedCounties(feedItems), [feedItems])
+  const availableCounties = useMemo(
+    () => collectFeedCounties(feedItems, filters.state),
+    [feedItems, filters.state]
+  )
 
   useEffect(() => {
     if (filters.county && !availableCounties.includes(filters.county)) {
       setFilters(f => ({ ...f, county: '' }))
     }
-  }, [availableCounties, filters.county])
+  }, [availableCounties, filters.county, filters.state])
 
   const upcomingCount = records.length
   const goveaseCount = goveaseListings.length

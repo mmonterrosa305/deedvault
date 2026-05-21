@@ -164,7 +164,10 @@ export default function LiveDataFilters({
           <select
             value={filters.state}
             disabled={disabled}
-            onChange={e => set({ state: e.target.value as LiveDataStateFilter })}
+            onChange={e => {
+              const state = e.target.value as LiveDataStateFilter
+              set({ state, county: '' })
+            }}
             className="w-full font-mono text-xs px-3 py-2 rounded"
             style={{ height: '42px' }}
           >

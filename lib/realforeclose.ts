@@ -13,6 +13,8 @@ const DEFAULT_AUCTION_TIME = '9:00 AM ET'
 const DAYS_AHEAD = 90
 const PAGE_SIZE_HINT = 10
 const DATE_CONCURRENCY = 4
+const COUNTY_CONCURRENCY = 4
+const COUNTY_FETCH_RETRIES = 2
 const DETAIL_BID_CONCURRENCY = 6
 
 const FETCH_HEADERS = {
@@ -187,12 +189,31 @@ export function isForeclosureAuctionType(auctionType: string): boolean {
   return normalizeAuctionType(auctionType) === 'FORECLOSURE'
 }
 
-export type RealForecloseAuctionKind = 'taxdeed' | 'foreclosure'
+export type RealForecloseAuctionKind = 'taxdeed' | 'foreclosure' | 'all'
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
 
 function matchesAuctionKind(auctionType: string, kind: RealForecloseAuctionKind): boolean {
+  if (kind === 'all') return true
   return kind === 'taxdeed'
     ? isTaxDeedAuctionType(auctionType)
     : isForeclosureAuctionType(auctionType)
+}
+
+function resolveStoredAuctionType(
+  auctionType: string,
+  fields: Record<string, string>
+): string {
+  const norm = normalizeAuctionType(auctionType)
+  if (norm === 'TAXDEED' || norm.includes('TAXDEED')) return 'TAXDEED'
+  if (norm === 'FORECLOSURE' || norm.includes('FORECLOSURE')) return 'FORECLOSURE'
+  if (fields['Certificate #']?.trim() || fields['Opening Bid']?.trim()) return 'TAXDEED'
+  if (fields['Final Judgment Amount']?.trim() || fields['Plaintiff Max Bid']?.trim()) {
+    return 'FORECLOSURE'
+  }
+  return auctionType.trim() || '—'
 }
 
 function mmDdYyyyFromIso(iso: string): string {
@@ -302,9 +323,10 @@ function parseAuctionBlocks(
     const parcelId = (fields['Parcel ID'] ?? '').trim()
     const auctionType = (fields['Auction Type'] ?? '').trim()
     if (!matchesAuctionKind(auctionType, kind)) continue
+    if (!caseNumber && !parcelId) continue
 
     const caseSlug = caseNumber.replace(/\s+/g, '') || parcelId || auctionId
-    const storedType = isTaxDeedAuctionType(auctionType) ? 'TAXDEED' : 'FORECLOSURE'
+    const storedType = resolveStoredAuctionType(auctionType, fields)
 
     listings.push({
       id: `rf-${county.key}-${auctionId}-${caseSlug}`,
@@ -523,6 +545,13 @@ function upcomingDates(): string[] {
 
 function buildCountyCounts(listings: RealForecloseListing[]): RealForecloseCountyCount[] {
   const counts = new Map<string, RealForecloseCountyCount>()
+  for (const county of FL_REALFORECLOSE_COUNTIES) {
+    counts.set(county.key, {
+      countyKey: county.key,
+      county: county.name,
+      count: 0,
+    })
+  }
   for (const row of listings) {
     const existing = counts.get(row.countyKey)
     if (existing) {
@@ -580,16 +609,33 @@ async function fetchFloridaRealForecloseByKind(kind: RealForecloseAuctionKind): 
 }> {
   const dates = upcomingDates()
 
-  const countyResults = await Promise.all(
-    FL_REALFORECLOSE_COUNTIES.map(async county => {
-      try {
-        const listings = await fetchCountyListings(county, kind)
-        return { county, listings, err: false as const }
-      } catch {
+  const countyResults: {
+    county: RealForecloseCounty
+    listings: RealForecloseListing[]
+    err: boolean
+  }[] = []
+
+  for (let i = 0; i < FL_REALFORECLOSE_COUNTIES.length; i += COUNTY_CONCURRENCY) {
+    const batch = FL_REALFORECLOSE_COUNTIES.slice(i, i + COUNTY_CONCURRENCY)
+    const batchResults = await Promise.all(
+      batch.map(async county => {
+        for (let attempt = 0; attempt <= COUNTY_FETCH_RETRIES; attempt++) {
+          try {
+            const listings = await fetchCountyListings(county, kind)
+            return { county, listings, err: false as const }
+          } catch {
+            if (attempt < COUNTY_FETCH_RETRIES) {
+              await sleep(400 * (attempt + 1))
+              continue
+            }
+            return { county, listings: [] as RealForecloseListing[], err: true as const }
+          }
+        }
         return { county, listings: [] as RealForecloseListing[], err: true as const }
-      }
-    })
-  )
+      })
+    )
+    countyResults.push(...batchResults)
+  }
 
   const byId = new Map<string, RealForecloseListing>()
   let datesWithAuctions = 0
@@ -624,7 +670,7 @@ async function fetchFloridaRealForecloseByKind(kind: RealForecloseAuctionKind): 
   }
 }
 
-/** Fetch upcoming Florida tax deed auctions from all RealForeclose county sites (90-day preview scan). */
+/** Fetch all upcoming waiting auctions from 25 RealForeclose county sites (90-day preview scan). */
 export async function fetchFloridaRealForecloseListings(): Promise<{
   listings: RealForecloseListing[]
   datesScanned: number
@@ -633,7 +679,7 @@ export async function fetchFloridaRealForecloseListings(): Promise<{
   countiesScanned: number
   countiesWithListings: number
 }> {
-  return fetchFloridaRealForecloseByKind('taxdeed')
+  return fetchFloridaRealForecloseByKind('all')
 }
 
 /** Fetch upcoming Florida foreclosure auctions from all RealForeclose county sites. */
