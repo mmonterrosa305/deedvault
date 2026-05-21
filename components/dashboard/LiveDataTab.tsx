@@ -1,10 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { MiamiDadeProperty } from '@/lib/miami-dade-api'
 import { REALFORECLOSE_URL } from '@/lib/miami-dade-api'
 import {
-  caseUniqueId,
   countyBaseUrl,
   FL_REALTDM_COUNTIES,
   FL_REALTDM_COUNTY_COUNT,
@@ -25,8 +24,20 @@ import {
 } from '@/lib/realforeclose'
 import { fmt } from '@/lib/listings'
 import { mergeLiveData, type LiveDataRecord } from '@/lib/live-data-merge'
+import {
+  bidToAssessedRatio,
+  collectFeedCounties,
+  defaultLiveDataFilters,
+  feedItemKey,
+  filterAndSortFeedItems,
+  formatBidToAssessedPct,
+  isGoodDealRatio,
+  type LiveDataFeedItem,
+  type LiveDataFilterState,
+} from '@/lib/live-data-feed'
 import LivePropertyModal from '@/components/listing/LivePropertyModal'
 import LiveDataLoadProgress from '@/components/dashboard/LiveDataLoadProgress'
+import LiveDataFilters from '@/components/dashboard/LiveDataFilters'
 
 type PropertiesResponse = {
   properties: MiamiDadeProperty[]
@@ -71,18 +82,6 @@ type RealForecloseResponse = {
   error?: string
 }
 
-type FeedItem =
-  | { kind: 'realtdm'; record: LiveDataRecord }
-  | { kind: 'govease'; listing: GovEaseListing }
-  | { kind: 'bid4assets'; listing: Bid4AssetsListing }
-  | { kind: 'sri'; listing: SriListing }
-  | { kind: 'realforeclose'; listing: RealForecloseListing }
-
-function feedItemKey(item: FeedItem): string {
-  if (item.kind === 'realtdm') return caseUniqueId(item.record.case)
-  return item.listing.id
-}
-
 export default function LiveDataTab() {
   const [records, setRecords] = useState<LiveDataRecord[]>([])
   const [goveaseListings, setGovEaseListings] = useState<GovEaseListing[]>([])
@@ -109,6 +108,7 @@ export default function LiveDataTab() {
   const [bid4assetsCalendarCount, setBid4assetsCalendarCount] = useState(0)
   const [bid4assetsSearchCount, setBid4assetsSearchCount] = useState(0)
   const [q, setQ] = useState('')
+  const [filters, setFilters] = useState<LiveDataFilterState>(defaultLiveDataFilters)
   const [selected, setSelected] = useState<LiveDataRecord | null>(null)
 
   useEffect(() => {
@@ -372,8 +372,8 @@ export default function LiveDataTab() {
     }
   }, [])
 
-  const feedItems = useMemo((): FeedItem[] => {
-    const items: FeedItem[] = [
+  const feedItems = useMemo((): LiveDataFeedItem[] => {
+    return [
       ...records.map(record => ({ kind: 'realtdm' as const, record })),
       ...goveaseListings.map(listing => ({ kind: 'govease' as const, listing })),
       ...bid4assetsListings.map(listing => ({ kind: 'bid4assets' as const, listing })),
@@ -383,32 +383,15 @@ export default function LiveDataTab() {
         listing,
       })),
     ]
-    items.sort((a, b) => {
-      const dateA =
-        a.kind === 'realtdm'
-          ? Date.parse(a.record.case.saleDate)
-          : a.kind === 'realforeclose'
-            ? Date.parse(a.listing.auctionDate)
-            : Date.parse(a.listing.saleDate)
-      const dateB =
-        b.kind === 'realtdm'
-          ? Date.parse(b.record.case.saleDate)
-          : b.kind === 'realforeclose'
-            ? Date.parse(b.listing.auctionDate)
-            : Date.parse(b.listing.saleDate)
-      const validA = !Number.isNaN(dateA)
-      const validB = !Number.isNaN(dateB)
-      if (validA && validB && dateA !== dateB) return dateA - dateB
-      if (validA && !validB) return -1
-      if (!validA && validB) return 1
-      const countyA =
-        a.kind === 'realtdm' ? a.record.case.county : a.listing.county
-      const countyB =
-        b.kind === 'realtdm' ? b.record.case.county : b.listing.county
-      return countyA.localeCompare(countyB)
-    })
-    return items
   }, [records, goveaseListings, bid4assetsListings, sriListings, realforecloseListings])
+
+  const availableCounties = useMemo(() => collectFeedCounties(feedItems), [feedItems])
+
+  useEffect(() => {
+    if (filters.county && !availableCounties.includes(filters.county)) {
+      setFilters(f => ({ ...f, county: '' }))
+    }
+  }, [availableCounties, filters.county])
 
   const upcomingCount = records.length
   const goveaseCount = goveaseListings.length
@@ -424,68 +407,10 @@ export default function LiveDataTab() {
   }, [realforecloseCountyCounts])
   const totalDisplayed = feedItems.length
 
-  const filtered = useMemo(() => {
-    if (!q) return feedItems
-    const lq = q.toLowerCase()
-    return feedItems.filter(item => {
-      if (item.kind === 'realtdm') {
-        const r = item.record
-        const c = r.case
-        return (
-          c.caseNumber.toLowerCase().includes(lq) ||
-          c.county.toLowerCase().includes(lq) ||
-          c.parcelNumber.toLowerCase().includes(lq) ||
-          c.status.toLowerCase().includes(lq) ||
-          r.displayAddress.toLowerCase().includes(lq) ||
-          (r.displayOwner?.toLowerCase().includes(lq) ?? false)
-        )
-      }
-      if (item.kind === 'govease') {
-        const g = item.listing
-        return (
-          g.county.toLowerCase().includes(lq) ||
-          g.address.toLowerCase().includes(lq) ||
-          (g.parcelNumber?.toLowerCase().includes(lq) ?? false) ||
-          (g.saleType?.toLowerCase().includes(lq) ?? false) ||
-          g.saleDate.toLowerCase().includes(lq)
-        )
-      }
-      if (item.kind === 'sri') {
-        const s = item.listing
-        return (
-          s.county.toLowerCase().includes(lq) ||
-          s.address.toLowerCase().includes(lq) ||
-          (s.parcelNumber?.toLowerCase().includes(lq) ?? false) ||
-          (s.saleType?.toLowerCase().includes(lq) ?? false) ||
-          (s.saleStatus?.toLowerCase().includes(lq) ?? false) ||
-          s.saleDate.toLowerCase().includes(lq) ||
-          s.state.toLowerCase().includes(lq)
-        )
-      }
-      if (item.kind === 'realforeclose') {
-        const r = item.listing
-        return (
-          r.county.toLowerCase().includes(lq) ||
-          r.caseNumber.toLowerCase().includes(lq) ||
-          r.parcelId.toLowerCase().includes(lq) ||
-          r.address.toLowerCase().includes(lq) ||
-          r.auctionType.toLowerCase().includes(lq) ||
-          r.auctionDateTime.toLowerCase().includes(lq) ||
-          r.auctionDate.toLowerCase().includes(lq) ||
-          r.state.toLowerCase().includes(lq) ||
-          (r.certificateNumber?.toLowerCase().includes(lq) ?? false)
-        )
-      }
-      const b = item.listing
-      return (
-        b.county.toLowerCase().includes(lq) ||
-        b.address.toLowerCase().includes(lq) ||
-        (b.auctionTitle?.toLowerCase().includes(lq) ?? false) ||
-        b.saleDate.toLowerCase().includes(lq) ||
-        b.state.toLowerCase().includes(lq)
-      )
-    })
-  }, [feedItems, q])
+  const filtered = useMemo(
+    () => filterAndSortFeedItems(feedItems, filters, q),
+    [feedItems, filters, q]
+  )
 
   const progressTotal = FL_REALTDM_COUNTY_COUNT + 4
   const progressLoaded =
@@ -650,10 +575,18 @@ export default function LiveDataTab() {
             {q
               ? `${filtered.length} match${filtered.length !== 1 ? 'es' : ''} · `
               : ''}
-            {filtered.length} DISPLAYED
+            {filtered.length} of {totalDisplayed} displayed
             {upcomingCount > 0 && ` · BIDS/ADDRS: ${detailsEnriched} of ${upcomingCount}`}
             {propertySource != null && ` · PARCELS: ${propertySource.toUpperCase()}`}
           </p>
+
+          <LiveDataFilters
+            filters={filters}
+            counties={availableCounties}
+            disabled={loading}
+            onChange={setFilters}
+            onReset={() => setFilters(defaultLiveDataFilters)}
+          />
 
           {filtered.length === 0 ? (
             <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
@@ -693,6 +626,57 @@ export default function LiveDataTab() {
   )
 }
 
+function feedCardStyle(isGoodDeal: boolean): CSSProperties {
+  return {
+    background: isGoodDeal ? 'var(--gold-glow)' : 'var(--panel)',
+    border: `1px solid ${isGoodDeal ? 'rgba(201,168,76,0.45)' : 'var(--border)'}`,
+  }
+}
+
+function feedCardHoverBorder(isGoodDeal: boolean): string {
+  return isGoodDeal ? 'rgba(201,168,76,0.65)' : 'var(--gold-dim)'
+}
+
+function GoodDealBadge() {
+  return (
+    <span
+      className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
+      style={{
+        background: 'var(--gold-glow)',
+        color: 'var(--gold)',
+        border: '1px solid rgba(201,168,76,0.45)',
+      }}
+    >
+      GOOD DEAL
+    </span>
+  )
+}
+
+function AssessedRatioBlock({
+  openingBid,
+  assessedValue,
+}: {
+  openingBid: number | null
+  assessedValue: number | null
+}) {
+  const ratio = bidToAssessedRatio(openingBid, assessedValue)
+  if (ratio == null) return null
+  const isGoodDeal = isGoodDealRatio(ratio)
+  return (
+    <div className="text-right">
+      <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+        % OF ASSESSED VALUE
+      </p>
+      <p
+        className="font-mono text-sm mt-0.5"
+        style={{ color: isGoodDeal ? 'var(--gold)' : 'var(--text)' }}
+      >
+        {formatBidToAssessedPct(ratio)}
+      </p>
+    </div>
+  )
+}
+
 function RealTdmCard({
   record,
   onSelect,
@@ -701,6 +685,10 @@ function RealTdmCard({
   onSelect: () => void
 }) {
   const r = record
+  const openingBid = r.case.openingBid
+  const assessedValue = r.assessedValue
+  const ratio = bidToAssessedRatio(openingBid, assessedValue)
+  const isGoodDeal = isGoodDealRatio(ratio)
   return (
     <article
       role="button"
@@ -713,9 +701,13 @@ function RealTdmCard({
         }
       }}
       className="rounded-md p-4 transition-all cursor-pointer"
-      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-dim)')}
-      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+      style={feedCardStyle(isGoodDeal)}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
+      onMouseLeave={e =>
+        (e.currentTarget.style.borderColor = isGoodDeal
+          ? 'rgba(201,168,76,0.45)'
+          : 'var(--border)')
+      }
     >
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -723,6 +715,7 @@ function RealTdmCard({
             <p className="font-mono text-xs" style={{ color: '#5a9fe8' }}>
               {r.case.county.toUpperCase()} · FL · REALTDM
             </p>
+            {isGoodDeal && <GoodDealBadge />}
             <span
               className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
               style={{
@@ -799,9 +792,10 @@ function RealTdmCard({
               OPENING BID
             </p>
             <p className="font-display text-2xl tracking-wide" style={{ color: 'var(--gold)' }}>
-              {r.case.openingBid != null ? fmt(r.case.openingBid) : '—'}
+              {openingBid != null ? fmt(openingBid) : '—'}
             </p>
           </div>
+          <AssessedRatioBlock openingBid={openingBid} assessedValue={assessedValue} />
           <a
             href={
               r.case.countyKey === 'miamidade'
@@ -829,12 +823,18 @@ function RealTdmCard({
 }
 
 function Bid4AssetsCard({ listing }: { listing: Bid4AssetsListing }) {
+  const ratio = bidToAssessedRatio(listing.openingBid, null)
+  const isGoodDeal = isGoodDealRatio(ratio)
   return (
     <article
       className="rounded-md p-4 transition-all"
-      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-dim)')}
-      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+      style={feedCardStyle(isGoodDeal)}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
+      onMouseLeave={e =>
+        (e.currentTarget.style.borderColor = isGoodDeal
+          ? 'rgba(201,168,76,0.45)'
+          : 'var(--border)')
+      }
     >
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -842,6 +842,7 @@ function Bid4AssetsCard({ listing }: { listing: Bid4AssetsListing }) {
             <p className="font-mono text-xs" style={{ color: '#5a9fe8' }}>
               {listing.county.toUpperCase()} · MI · BID4ASSETS
             </p>
+            {isGoodDeal && <GoodDealBadge />}
             {listing.source === 'search' && (
               <span
                 className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
@@ -905,6 +906,7 @@ function Bid4AssetsCard({ listing }: { listing: Bid4AssetsListing }) {
               {listing.openingBid != null ? fmt(listing.openingBid) : '—'}
             </p>
           </div>
+          <AssessedRatioBlock openingBid={listing.openingBid} assessedValue={null} />
           <a
             href={BID4ASSETS_HOME_URL}
             target="_blank"
@@ -925,12 +927,18 @@ function Bid4AssetsCard({ listing }: { listing: Bid4AssetsListing }) {
 }
 
 function SriCard({ listing }: { listing: SriListing }) {
+  const ratio = bidToAssessedRatio(listing.openingBid, null)
+  const isGoodDeal = isGoodDealRatio(ratio)
   return (
     <article
       className="rounded-md p-4 transition-all"
-      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-dim)')}
-      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+      style={feedCardStyle(isGoodDeal)}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
+      onMouseLeave={e =>
+        (e.currentTarget.style.borderColor = isGoodDeal
+          ? 'rgba(201,168,76,0.45)'
+          : 'var(--border)')
+      }
     >
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -938,6 +946,7 @@ function SriCard({ listing }: { listing: SriListing }) {
             <p className="font-mono text-xs" style={{ color: '#5a9fe8' }}>
               {listing.county.toUpperCase()} · MI · SRI
             </p>
+            {isGoodDeal && <GoodDealBadge />}
             {listing.saleType && (
               <span
                 className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
@@ -1001,6 +1010,7 @@ function SriCard({ listing }: { listing: SriListing }) {
               {listing.openingBid != null ? fmt(listing.openingBid) : '—'}
             </p>
           </div>
+          <AssessedRatioBlock openingBid={listing.openingBid} assessedValue={null} />
           <a
             href={SRI_HOME_URL}
             target="_blank"
@@ -1021,12 +1031,18 @@ function SriCard({ listing }: { listing: SriListing }) {
 }
 
 function RealForecloseCard({ listing }: { listing: RealForecloseListing }) {
+  const ratio = bidToAssessedRatio(listing.openingBid, listing.assessedValue)
+  const isGoodDeal = isGoodDealRatio(ratio)
   return (
     <article
       className="rounded-md p-4 transition-all"
-      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-dim)')}
-      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+      style={feedCardStyle(isGoodDeal)}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
+      onMouseLeave={e =>
+        (e.currentTarget.style.borderColor = isGoodDeal
+          ? 'rgba(201,168,76,0.45)'
+          : 'var(--border)')
+      }
     >
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -1034,6 +1050,7 @@ function RealForecloseCard({ listing }: { listing: RealForecloseListing }) {
             <p className="font-mono text-xs" style={{ color: '#5a9fe8' }}>
               {listing.county.toUpperCase()} · FL · REALFORECLOSE
             </p>
+            {isGoodDeal && <GoodDealBadge />}
             {listing.auctionType && listing.auctionType !== '—' && (
               <span
                 className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
@@ -1109,6 +1126,10 @@ function RealForecloseCard({ listing }: { listing: RealForecloseListing }) {
               {listing.openingBid != null ? fmt(listing.openingBid) : '—'}
             </p>
           </div>
+          <AssessedRatioBlock
+            openingBid={listing.openingBid}
+            assessedValue={listing.assessedValue}
+          />
           <a
             href={listing.auctionUrl}
             target="_blank"
@@ -1130,12 +1151,18 @@ function RealForecloseCard({ listing }: { listing: RealForecloseListing }) {
 
 function GovEaseCard({ listing }: { listing: GovEaseListing }) {
   const href = GOVEASE_HOME_URL
+  const ratio = bidToAssessedRatio(listing.openingBid, null)
+  const isGoodDeal = isGoodDealRatio(ratio)
   return (
     <article
       className="rounded-md p-4 transition-all"
-      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-dim)')}
-      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+      style={feedCardStyle(isGoodDeal)}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
+      onMouseLeave={e =>
+        (e.currentTarget.style.borderColor = isGoodDeal
+          ? 'rgba(201,168,76,0.45)'
+          : 'var(--border)')
+      }
     >
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -1143,6 +1170,7 @@ function GovEaseCard({ listing }: { listing: GovEaseListing }) {
             <p className="font-mono text-xs" style={{ color: '#5a9fe8' }}>
               {listing.county.toUpperCase()} · FL · GOVEASE
             </p>
+            {isGoodDeal && <GoodDealBadge />}
             {listing.saleType && (
               <span
                 className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
@@ -1208,6 +1236,7 @@ function GovEaseCard({ listing }: { listing: GovEaseListing }) {
               {listing.openingBid != null ? fmt(listing.openingBid) : '—'}
             </p>
           </div>
+          <AssessedRatioBlock openingBid={listing.openingBid} assessedValue={null} />
           <a
             href={href}
             target="_blank"
