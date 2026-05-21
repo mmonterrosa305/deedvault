@@ -11,9 +11,14 @@ import {
   type RealTdmCase,
 } from '@/lib/realtdm'
 import {
+  BID4ASSETS_HOME_URL,
+  type Bid4AssetsListing,
+} from '@/lib/bid4assets'
+import {
   GOVEASE_HOME_URL,
   type GovEaseListing,
 } from '@/lib/govease'
+import { SRI_HOME_URL, type SriListing } from '@/lib/sri'
 import { fmt } from '@/lib/listings'
 import { mergeLiveData, type LiveDataRecord } from '@/lib/live-data-merge'
 import LivePropertyModal from '@/components/listing/LivePropertyModal'
@@ -39,17 +44,35 @@ type GovEaseResponse = {
   error?: string
 }
 
+type Bid4AssetsResponse = {
+  listings: Bid4AssetsListing[]
+  calendarCount?: number
+  searchCount?: number
+  error?: string
+}
+
+type SriResponse = {
+  listings: SriListing[]
+  countyCount?: number
+  error?: string
+}
+
 type FeedItem =
   | { kind: 'realtdm'; record: LiveDataRecord }
   | { kind: 'govease'; listing: GovEaseListing }
+  | { kind: 'bid4assets'; listing: Bid4AssetsListing }
+  | { kind: 'sri'; listing: SriListing }
 
 function feedItemKey(item: FeedItem): string {
-  return item.kind === 'realtdm' ? caseUniqueId(item.record.case) : item.listing.id
+  if (item.kind === 'realtdm') return caseUniqueId(item.record.case)
+  return item.listing.id
 }
 
 export default function LiveDataTab() {
   const [records, setRecords] = useState<LiveDataRecord[]>([])
   const [goveaseListings, setGovEaseListings] = useState<GovEaseListing[]>([])
+  const [bid4assetsListings, setBid4assetsListings] = useState<Bid4AssetsListing[]>([])
+  const [sriListings, setSriListings] = useState<SriListing[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [propertySource, setPropertySource] = useState<'primary' | 'fallback' | null>(null)
@@ -61,6 +84,10 @@ export default function LiveDataTab() {
   const [loadingCountyNames, setLoadingCountyNames] = useState<string[]>([])
   const [loadingParcels, setLoadingParcels] = useState(false)
   const [loadingGovEase, setLoadingGovEase] = useState(false)
+  const [loadingBid4Assets, setLoadingBid4Assets] = useState(false)
+  const [loadingSri, setLoadingSri] = useState(false)
+  const [bid4assetsCalendarCount, setBid4assetsCalendarCount] = useState(0)
+  const [bid4assetsSearchCount, setBid4assetsSearchCount] = useState(0)
   const [q, setQ] = useState('')
   const [selected, setSelected] = useState<LiveDataRecord | null>(null)
 
@@ -95,6 +122,50 @@ export default function LiveDataTab() {
       }
     }
 
+    async function loadBid4Assets(): Promise<Bid4AssetsResponse & { ok: boolean }> {
+      setLoadingBid4Assets(true)
+      try {
+        const res = await fetch('/api/bid4assets')
+        const data = (await res.json()) as Bid4AssetsResponse
+        if (!res.ok) throw new Error(data.error ?? 'Bid4Assets failed')
+        if (!cancelled) {
+          setBid4assetsListings(data.listings ?? [])
+          setBid4assetsCalendarCount(data.calendarCount ?? 0)
+          setBid4assetsSearchCount(data.searchCount ?? 0)
+        }
+        return { ...data, ok: true }
+      } catch (err) {
+        if (!cancelled) setBid4assetsListings([])
+        const message = err instanceof Error ? err.message : 'Bid4Assets fetch failed'
+        return {
+          ok: false,
+          error: message,
+          listings: [],
+          calendarCount: 0,
+          searchCount: 0,
+        }
+      } finally {
+        if (!cancelled) setLoadingBid4Assets(false)
+      }
+    }
+
+    async function loadSri(): Promise<SriResponse & { ok: boolean }> {
+      setLoadingSri(true)
+      try {
+        const res = await fetch('/api/sri')
+        const data = (await res.json()) as SriResponse
+        if (!res.ok) throw new Error(data.error ?? 'SRI failed')
+        if (!cancelled) setSriListings(data.listings ?? [])
+        return { ...data, ok: true }
+      } catch (err) {
+        if (!cancelled) setSriListings([])
+        const message = err instanceof Error ? err.message : 'SRI fetch failed'
+        return { ok: false, error: message, listings: [], countyCount: 0 }
+      } finally {
+        if (!cancelled) setLoadingSri(false)
+      }
+    }
+
     async function loadGovEase(): Promise<GovEaseResponse & { ok: boolean }> {
       setLoadingGovEase(true)
       try {
@@ -123,15 +194,23 @@ export default function LiveDataTab() {
       setLoadingCountyNames([])
       setLoadingParcels(false)
       setLoadingGovEase(true)
+      setLoadingBid4Assets(true)
+      setLoadingSri(true)
       setRecords([])
       setGovEaseListings([])
+      setBid4assetsListings([])
+      setSriListings([])
       setCaseCount(0)
       setDetailsEnriched(0)
       setGovEaseSheetCount(0)
       setGovEaseLiveCount(0)
+      setBid4assetsCalendarCount(0)
+      setBid4assetsSearchCount(0)
 
       const propsPromise = fetch('/api/miami-dade/properties')
       const goveasePromise = loadGovEase()
+      const bid4assetsPromise = loadBid4Assets()
+      const sriPromise = loadSri()
 
       const countyResults = await Promise.all(
         FL_REALTDM_COUNTIES.map(county => loadCounty(county))
@@ -155,7 +234,11 @@ export default function LiveDataTab() {
         propsErr = 'Failed to load parcel data'
       }
 
-      const goveaseResult = await goveasePromise
+      const [goveaseResult, bid4assetsResult, sriResult] = await Promise.all([
+        goveasePromise,
+        bid4assetsPromise,
+        sriPromise,
+      ])
 
       if (cancelled) return
 
@@ -175,11 +258,25 @@ export default function LiveDataTab() {
       if (!goveaseResult.ok) {
         warnings.push('GovEase schedule unavailable')
       }
+      if (!bid4assetsResult.ok) {
+        warnings.push('Bid4Assets listings unavailable')
+      }
+      if (!sriResult.ok) {
+        warnings.push('SRI listings unavailable')
+      }
       if (!propsOk) {
         warnings.push(`Property data unavailable: ${propsErr}`)
       }
       const goveaseTotal = goveaseResult.listings?.length ?? 0
-      if (allCases.length === 0 && failedCounties === FL_REALTDM_COUNTY_COUNT && goveaseTotal === 0) {
+      const bid4assetsTotal = bid4assetsResult.listings?.length ?? 0
+      const sriTotal = sriResult.listings?.length ?? 0
+      if (
+        allCases.length === 0 &&
+        failedCounties === FL_REALTDM_COUNTY_COUNT &&
+        goveaseTotal === 0 &&
+        bid4assetsTotal === 0 &&
+        sriTotal === 0
+      ) {
         setError('Failed to load tax deed cases from all sources')
       } else if (warnings.length > 0) {
         setError(warnings.join(' · '))
@@ -199,12 +296,18 @@ export default function LiveDataTab() {
     const items: FeedItem[] = [
       ...records.map(record => ({ kind: 'realtdm' as const, record })),
       ...goveaseListings.map(listing => ({ kind: 'govease' as const, listing })),
+      ...bid4assetsListings.map(listing => ({ kind: 'bid4assets' as const, listing })),
+      ...sriListings.map(listing => ({ kind: 'sri' as const, listing })),
     ]
     items.sort((a, b) => {
       const dateA =
-        a.kind === 'realtdm' ? Date.parse(a.record.case.saleDate) : Date.parse(a.listing.saleDate)
+        a.kind === 'realtdm'
+          ? Date.parse(a.record.case.saleDate)
+          : Date.parse(a.listing.saleDate)
       const dateB =
-        b.kind === 'realtdm' ? Date.parse(b.record.case.saleDate) : Date.parse(b.listing.saleDate)
+        b.kind === 'realtdm'
+          ? Date.parse(b.record.case.saleDate)
+          : Date.parse(b.listing.saleDate)
       const validA = !Number.isNaN(dateA)
       const validB = !Number.isNaN(dateB)
       if (validA && validB && dateA !== dateB) return dateA - dateB
@@ -215,10 +318,12 @@ export default function LiveDataTab() {
       return countyA.localeCompare(countyB)
     })
     return items
-  }, [records, goveaseListings])
+  }, [records, goveaseListings, bid4assetsListings, sriListings])
 
   const upcomingCount = records.length
   const goveaseCount = goveaseListings.length
+  const bid4assetsCount = bid4assetsListings.length
+  const sriCount = sriListings.length
   const totalDisplayed = feedItems.length
 
   const filtered = useMemo(() => {
@@ -237,20 +342,45 @@ export default function LiveDataTab() {
           (r.displayOwner?.toLowerCase().includes(lq) ?? false)
         )
       }
-      const g = item.listing
+      if (item.kind === 'govease') {
+        const g = item.listing
+        return (
+          g.county.toLowerCase().includes(lq) ||
+          g.address.toLowerCase().includes(lq) ||
+          (g.parcelNumber?.toLowerCase().includes(lq) ?? false) ||
+          (g.saleType?.toLowerCase().includes(lq) ?? false) ||
+          g.saleDate.toLowerCase().includes(lq)
+        )
+      }
+      if (item.kind === 'sri') {
+        const s = item.listing
+        return (
+          s.county.toLowerCase().includes(lq) ||
+          s.address.toLowerCase().includes(lq) ||
+          (s.parcelNumber?.toLowerCase().includes(lq) ?? false) ||
+          (s.saleType?.toLowerCase().includes(lq) ?? false) ||
+          (s.saleStatus?.toLowerCase().includes(lq) ?? false) ||
+          s.saleDate.toLowerCase().includes(lq) ||
+          s.state.toLowerCase().includes(lq)
+        )
+      }
+      const b = item.listing
       return (
-        g.county.toLowerCase().includes(lq) ||
-        g.address.toLowerCase().includes(lq) ||
-        (g.parcelNumber?.toLowerCase().includes(lq) ?? false) ||
-        (g.saleType?.toLowerCase().includes(lq) ?? false) ||
-        g.saleDate.toLowerCase().includes(lq)
+        b.county.toLowerCase().includes(lq) ||
+        b.address.toLowerCase().includes(lq) ||
+        (b.auctionTitle?.toLowerCase().includes(lq) ?? false) ||
+        b.saleDate.toLowerCase().includes(lq) ||
+        b.state.toLowerCase().includes(lq)
       )
     })
   }, [feedItems, q])
 
-  const progressTotal = FL_REALTDM_COUNTY_COUNT + 1
+  const progressTotal = FL_REALTDM_COUNTY_COUNT + 3
   const progressLoaded =
-    loadedCountyCount + (loadingGovEase ? 0 : 1)
+    loadedCountyCount +
+    (loadingGovEase ? 0 : 1) +
+    (loadingBid4Assets ? 0 : 1) +
+    (loadingSri ? 0 : 1)
 
   return (
     <div className="px-4 sm:px-6 py-6 max-w-6xl mx-auto">
@@ -259,17 +389,17 @@ export default function LiveDataTab() {
       )}
       <div className="mb-6">
         <p className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
-          FLORIDA · REALTDM + GOVEASE
+          FLORIDA · MICHIGAN · REALTDM + GOVEASE + BID4ASSETS + SRI
         </p>
         <h2 className="font-display text-3xl tracking-wide mt-1" style={{ color: 'var(--text)' }}>
           LIVE TAX DEED CASES
         </h2>
         <p className="font-mono text-xs mt-2 max-w-2xl" style={{ color: 'var(--muted)' }}>
           Upcoming resale auctions (30-day and full advertisement) from Florida RealTDM counties,
-          plus GovEase schedule and live parcel listings for Orange, Alachua, Hillsborough,
-          Sarasota, Volusia, Pinellas, Polk, Lake, Marion, and Osceola. Miami-Dade parcels merge
-          with county GIS when the parcel number matches. Only cases with a sale date today or
-          later are shown.
+          GovEase schedule and live parcels (10 FL counties), Bid4Assets tax sales (10 MI counties),
+          and SRI tax deed auctions (10 MI counties). Miami-Dade parcels merge with county GIS when
+          the parcel number matches. Only
+          cases with a sale date today or later are shown.
           {propertySource === 'fallback' &&
             ' (Miami-Dade ArcGIS using county backup endpoint.)'}
         </p>
@@ -309,11 +439,12 @@ export default function LiveDataTab() {
         <LiveDataLoadProgress
           loadedCount={progressLoaded}
           totalCount={progressTotal}
-          loadingCountyNames={
-            loadingGovEase
-              ? [...loadingCountyNames, 'GovEase']
-              : loadingCountyNames
-          }
+          loadingCountyNames={[
+            ...loadingCountyNames,
+            ...(loadingGovEase ? ['GovEase'] : []),
+            ...(loadingBid4Assets ? ['Bid4Assets'] : []),
+            ...(loadingSri ? ['SRI'] : []),
+          ]}
           loadingParcels={loadingParcels}
         />
       )}
@@ -352,6 +483,22 @@ export default function LiveDataTab() {
               </>
             )}
             {' · '}
+            <span style={{ color: 'var(--gold)' }}>{bid4assetsCount}</span> Bid4Assets listing
+            {bid4assetsCount !== 1 ? 's' : ''}
+            {bid4assetsCount > 0 && (
+              <>
+                {' '}
+                ({bid4assetsSearchCount} search
+                {bid4assetsCalendarCount > 0
+                  ? ` · ${bid4assetsCalendarCount} calendar`
+                  : ''}
+                )
+              </>
+            )}
+            {' · '}
+            <span style={{ color: 'var(--gold)' }}>{sriCount}</span> SRI listing
+            {sriCount !== 1 ? 's' : ''}
+            {' · '}
             <span style={{ color: 'var(--text)' }}>{caseCount}</span> total RealTDM cases found
             {caseCount > upcomingCount && (
               <> ({caseCount - upcomingCount} past sale{caseCount - upcomingCount !== 1 ? 's' : ''} hidden)</>
@@ -386,8 +533,12 @@ export default function LiveDataTab() {
                     record={item.record}
                     onSelect={() => setSelected(item.record)}
                   />
-                ) : (
+                ) : item.kind === 'govease' ? (
                   <GovEaseCard key={feedItemKey(item)} listing={item.listing} />
+                ) : item.kind === 'bid4assets' ? (
+                  <Bid4AssetsCard key={feedItemKey(item)} listing={item.listing} />
+                ) : (
+                  <SriCard key={feedItemKey(item)} listing={item.listing} />
                 )
               )}
             </div>
@@ -526,6 +677,198 @@ function RealTdmCard({
             {r.case.countyKey === 'miamidade'
               ? 'VIEW ON REALFORECLOSE →'
               : 'VIEW ON REALTDM →'}
+          </a>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function Bid4AssetsCard({ listing }: { listing: Bid4AssetsListing }) {
+  return (
+    <article
+      className="rounded-md p-4 transition-all"
+      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-dim)')}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+    >
+      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <p className="font-mono text-xs" style={{ color: '#5a9fe8' }}>
+              {listing.county.toUpperCase()} · MI · BID4ASSETS
+            </p>
+            {listing.source === 'search' && (
+              <span
+                className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
+                style={{
+                  background: 'rgba(58,170,110,0.12)',
+                  color: '#3aaa6e',
+                  border: '1px solid rgba(58,170,110,0.25)',
+                }}
+              >
+                LIVE AUCTION
+              </span>
+            )}
+            {listing.source === 'calendar' && (
+              <span
+                className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
+                style={{
+                  background: 'rgba(201,168,76,0.12)',
+                  color: 'var(--gold)',
+                  border: '1px solid rgba(201,168,76,0.25)',
+                }}
+              >
+                SCHEDULED
+              </span>
+            )}
+          </div>
+          <p className="text-sm font-medium leading-snug" style={{ color: 'var(--text)' }}>
+            {listing.address}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 mt-3">
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                COUNTY
+              </p>
+              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                {listing.county}
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                STATE
+              </p>
+              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                {listing.state}
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                SALE DATE
+              </p>
+              <p className="font-mono text-xs mt-0.5">{listing.saleDate}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+          <div className="text-right">
+            <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+              OPENING BID
+            </p>
+            <p className="font-display text-2xl tracking-wide" style={{ color: 'var(--gold)' }}>
+              {listing.openingBid != null ? fmt(listing.openingBid) : '—'}
+            </p>
+          </div>
+          <a
+            href={BID4ASSETS_HOME_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
+            style={{
+              background: 'var(--gold-glow)',
+              border: '1px solid rgba(201,168,76,0.35)',
+              color: 'var(--gold)',
+            }}
+          >
+            VIEW ON BID4ASSETS →
+          </a>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function SriCard({ listing }: { listing: SriListing }) {
+  return (
+    <article
+      className="rounded-md p-4 transition-all"
+      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-dim)')}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+    >
+      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <p className="font-mono text-xs" style={{ color: '#5a9fe8' }}>
+              {listing.county.toUpperCase()} · MI · SRI
+            </p>
+            {listing.saleType && (
+              <span
+                className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
+                style={{
+                  background: 'rgba(90,159,232,0.12)',
+                  color: '#5a9fe8',
+                  border: '1px solid rgba(90,159,232,0.25)',
+                }}
+              >
+                {listing.saleType}
+              </span>
+            )}
+            {listing.saleStatus && (
+              <span
+                className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
+                style={{
+                  background: 'rgba(201,168,76,0.12)',
+                  color: 'var(--gold)',
+                  border: '1px solid rgba(201,168,76,0.25)',
+                }}
+              >
+                {listing.saleStatus}
+              </span>
+            )}
+          </div>
+          <p className="text-sm font-medium leading-snug" style={{ color: 'var(--text)' }}>
+            {listing.address}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 mt-3">
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                COUNTY
+              </p>
+              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                {listing.county}
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                STATE
+              </p>
+              <p className="font-mono text-xs mt-0.5" style={{ color: 'var(--text)' }}>
+                {listing.state}
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+                SALE DATE
+              </p>
+              <p className="font-mono text-xs mt-0.5">{listing.saleDate}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+          <div className="text-right">
+            <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
+              OPENING BID
+            </p>
+            <p className="font-display text-2xl tracking-wide" style={{ color: 'var(--gold)' }}>
+              {listing.openingBid != null ? fmt(listing.openingBid) : '—'}
+            </p>
+          </div>
+          <a
+            href={SRI_HOME_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
+            style={{
+              background: 'var(--gold-glow)',
+              border: '1px solid rgba(201,168,76,0.35)',
+              color: 'var(--gold)',
+            }}
+          >
+            VIEW ON SRI →
           </a>
         </div>
       </div>
