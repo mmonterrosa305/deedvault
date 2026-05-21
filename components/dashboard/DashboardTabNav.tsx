@@ -8,8 +8,11 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'alerts', label: 'Alerts' },
   { id: 'agent', label: 'Agent' },
   { id: 'live', label: 'Live Data' },
+  { id: 'foreclosures', label: 'Foreclosures' },
   { id: 'settings', label: 'Settings' },
 ]
+
+const LIVE_STYLE_TABS: TabId[] = ['live', 'foreclosures']
 
 export default function DashboardTabNav() {
   const { activeTab, setActiveTab, saved, alerts } = useDashboard()
@@ -22,6 +25,7 @@ export default function DashboardTabNav() {
       <div className="flex gap-1 px-4 min-w-max">
         {TABS.map(tab => {
           const active = activeTab === tab.id
+          const liveStyle = LIVE_STYLE_TABS.includes(tab.id)
           const badge =
             tab.id === 'saved' && saved.length > 0
               ? saved.length
@@ -35,20 +39,19 @@ export default function DashboardTabNav() {
               onClick={() => setActiveTab(tab.id)}
               className="font-mono text-xs tracking-widest px-4 py-3 transition-all whitespace-nowrap flex items-center gap-2"
               style={{
-                color:
-                  tab.id === 'live'
-                    ? active
-                      ? 'var(--gold)'
-                      : undefined
-                    : active
-                      ? 'var(--gold)'
-                      : 'var(--muted)',
+                color: liveStyle
+                  ? active
+                    ? 'var(--gold)'
+                    : undefined
+                  : active
+                    ? 'var(--gold)'
+                    : 'var(--muted)',
                 borderBottom: active ? '2px solid var(--gold)' : '2px solid transparent',
                 background: 'transparent',
                 cursor: 'pointer',
               }}
             >
-              {tab.id === 'live' ? (
+              {liveStyle ? (
                 <>
                   <span className="live-indicator-dot" aria-hidden />
                   <span

@@ -8,6 +8,7 @@ import AlertsTab from '@/components/dashboard/AlertsTab'
 import AgentTab from '@/components/dashboard/AgentTab'
 import SettingsTab from '@/components/dashboard/SettingsTab'
 import LiveDataTab from '@/components/dashboard/LiveDataTab'
+import ForeclosuresTab from '@/components/dashboard/ForeclosuresTab'
 
 function DashboardContent() {
   const { activeTab } = useDashboard()
@@ -19,6 +20,7 @@ function DashboardContent() {
       {activeTab === 'alerts' && <AlertsTab />}
       {activeTab === 'agent' && <AgentTab />}
       {activeTab === 'live' && <LiveDataTab />}
+      {activeTab === 'foreclosures' && <ForeclosuresTab />}
       {activeTab === 'settings' && <SettingsTab />}
     </>
   )
