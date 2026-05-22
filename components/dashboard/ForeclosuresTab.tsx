@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import type { ForeclosureListing } from '@/lib/foreclosure-listing'
 import {
   collectForeclosureCounties,
@@ -55,7 +56,21 @@ const MI_SUB_TABS: { id: MichiganSubTab; label: string }[] = [
   { id: 'counties', label: 'County Sources' },
 ]
 
-export default function ForeclosuresTab() {
+const MICHIGAN_FORECLOSURES_API = '/api/michigan-foreclosures'
+
+function parseRegionParam(value: string | null): ForeclosureRegion | null {
+  if (value === 'florida' || value === 'michigan') return value
+  return null
+}
+
+function parseMiTabParam(value: string | null): MichiganSubTab | null {
+  if (value === 'auctions' || value === 'counties') return value
+  return null
+}
+
+function ForeclosuresTabContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [region, setRegion] = useState<ForeclosureRegion>('florida')
   const [subTab, setSubTab] = useState<ForeclosureSubTab>('auctions')
   const [miSubTab, setMiSubTab] = useState<MichiganSubTab>('auctions')
@@ -78,6 +93,44 @@ export default function ForeclosuresTab() {
   const [warnings, setWarnings] = useState<string[]>([])
   const [q, setQ] = useState('')
   const [filters, setFilters] = useState<ForeclosureFilterState>(defaultForeclosureFilters)
+  const miFetchGen = useRef(0)
+
+  const syncForeclosuresUrl = useCallback(
+    (patch: { region?: ForeclosureRegion; miTab?: MichiganSubTab }) => {
+      const params = new URLSearchParams(searchParams.toString())
+      params.set('tab', 'foreclosures')
+      if (patch.region) params.set('region', patch.region)
+      if (patch.miTab) params.set('miTab', patch.miTab)
+      router.replace(`/dashboard?${params.toString()}`, { scroll: false })
+    },
+    [router, searchParams]
+  )
+
+  useEffect(() => {
+    const urlRegion = parseRegionParam(searchParams.get('region'))
+    const urlMiTab = parseMiTabParam(searchParams.get('miTab'))
+    if (urlRegion) setRegion(urlRegion)
+    if (urlMiTab) setMiSubTab(urlMiTab)
+  }, [searchParams])
+
+  const selectRegion = useCallback(
+    (next: ForeclosureRegion) => {
+      setRegion(next)
+      syncForeclosuresUrl({
+        region: next,
+        miTab: next === 'michigan' ? miSubTab : undefined,
+      })
+    },
+    [miSubTab, syncForeclosuresUrl]
+  )
+
+  const selectMiSubTab = useCallback(
+    (next: MichiganSubTab) => {
+      setMiSubTab(next)
+      syncForeclosuresUrl({ region: 'michigan', miTab: next })
+    },
+    [syncForeclosuresUrl]
+  )
 
   useEffect(() => {
     if (flLoaded) return
@@ -168,30 +221,49 @@ export default function ForeclosuresTab() {
   }, [flLoaded])
 
   const loadMichigan = useCallback(async () => {
-    if (miLoaded) return
+    const gen = ++miFetchGen.current
     setLoadingMi(true)
     setMiWarnings([])
     try {
-      const res = await fetch('/api/foreclosures/michigan', { cache: 'no-store' })
+      const res = await fetch(MICHIGAN_FORECLOSURES_API, { cache: 'no-store' })
+      if (!res.ok) {
+        const body = await res.text()
+        let message = `Michigan foreclosures API returned ${res.status}`
+        try {
+          const parsed = JSON.parse(body) as { error?: string }
+          if (parsed.error) message = parsed.error
+        } catch {
+          if (res.status === 404) {
+            message =
+              'Michigan foreclosures API not found. Restart the dev server after pulling latest changes.'
+          }
+        }
+        throw new Error(message)
+      }
       const data = (await res.json()) as MichiganResponse
-      if (!res.ok) throw new Error(data.error ?? 'Michigan fetch failed')
+      if (gen !== miFetchGen.current) return
       setMiListings(data.listings ?? [])
       setMiSourceCounts(data.sourceCounts ?? null)
       setMiWarnings(data.warnings ?? [])
+      setMiLoaded(true)
     } catch (err) {
+      if (gen !== miFetchGen.current) return
       setMiListings([])
+      setMiSourceCounts(null)
       setMiWarnings([
         err instanceof Error ? err.message : 'Michigan foreclosures fetch failed',
       ])
+      setMiLoaded(false)
     } finally {
-      setMiLoaded(true)
-      setLoadingMi(false)
+      if (gen === miFetchGen.current) setLoadingMi(false)
     }
-  }, [miLoaded])
+  }, [])
 
   useEffect(() => {
-    if (region === 'michigan') loadMichigan()
-  }, [region, loadMichigan])
+    if (region === 'michigan' && !miLoaded && !loadingMi) {
+      loadMichigan()
+    }
+  }, [region, miLoaded, loadingMi, loadMichigan])
 
   useEffect(() => {
     if (region === 'michigan') {
@@ -295,7 +367,7 @@ export default function ForeclosuresTab() {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setRegion(tab.id)}
+              onClick={() => selectRegion(tab.id)}
               className="font-mono text-xs tracking-widest px-4 py-2 transition-all whitespace-nowrap"
               style={{
                 color: active ? 'var(--gold)' : 'var(--muted)',
@@ -362,7 +434,7 @@ export default function ForeclosuresTab() {
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setMiSubTab(tab.id)}
+                onClick={() => selectMiSubTab(tab.id)}
                 className="font-mono text-xs tracking-widest px-4 py-2 transition-all whitespace-nowrap"
                 style={{
                   color: active ? 'var(--gold)' : 'var(--muted)',
@@ -533,5 +605,23 @@ export default function ForeclosuresTab() {
         />
       )}
     </div>
+  )
+}
+
+function ForeclosuresTabFallback() {
+  return (
+    <div className="px-4 sm:px-6 py-6 max-w-6xl mx-auto">
+      <p className="font-mono text-xs text-center py-16" style={{ color: 'var(--muted)' }}>
+        Loading foreclosures…
+      </p>
+    </div>
+  )
+}
+
+export default function ForeclosuresTab() {
+  return (
+    <Suspense fallback={<ForeclosuresTabFallback />}>
+      <ForeclosuresTabContent />
+    </Suspense>
   )
 }

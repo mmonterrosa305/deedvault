@@ -95,6 +95,13 @@ function wayneToListing(row: WayneAuctionListing): ForeclosureListing {
 }
 
 function taxSaleToListing(row: TaxSaleListing): ForeclosureListing {
+  const caseNumber =
+    row.lotNumber && row.lotNumber !== '—'
+      ? `Lot ${row.lotNumber}`
+      : row.parcelId !== '—'
+        ? row.parcelId
+        : row.id
+
   return {
     id: `mi-taxsale-${row.id}`,
     category: 'auction',
@@ -102,13 +109,13 @@ function taxSaleToListing(row: TaxSaleListing): ForeclosureListing {
     countyKey: row.countyKey,
     state: 'MI',
     address: row.address,
-    caseNumber: row.auctionGroup,
+    caseNumber,
     parcelId: row.parcelId,
     openingBid: row.openingBid,
     estimatedValue: null,
     eventDate: row.saleDate,
     eventDateDisplay: row.saleDateDisplay,
-    auctionType: 'Tax forfeiture (tax-sale.info)',
+    auctionType: `Tax forfeiture · ${row.auctionGroup}`,
     sourceUrl: row.lotUrl,
     sourceLabel: 'tax-sale.info',
   }

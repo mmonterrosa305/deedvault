@@ -1,5 +1,6 @@
 'use client'
 
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useDashboard, type TabId } from '@/context/DashboardContext'
 
 const TABS: { id: TabId; label: string }[] = [
@@ -16,6 +17,19 @@ const LIVE_STYLE_TABS: TabId[] = ['live', 'foreclosures']
 
 export default function DashboardTabNav() {
   const { activeTab, setActiveTab, saved, alerts } = useDashboard()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  const selectTab = (tab: TabId) => {
+    setActiveTab(tab)
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('tab', tab)
+    if (tab !== 'foreclosures') {
+      params.delete('region')
+      params.delete('miTab')
+    }
+    router.replace(`/dashboard?${params.toString()}`, { scroll: false })
+  }
 
   return (
     <div
@@ -36,7 +50,7 @@ export default function DashboardTabNav() {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => selectTab(tab.id)}
               className="font-mono text-xs tracking-widest px-4 py-3 transition-all whitespace-nowrap flex items-center gap-2"
               style={{
                 color: liveStyle

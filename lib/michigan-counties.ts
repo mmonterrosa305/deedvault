@@ -288,6 +288,10 @@ export function normalizeMichiganCountyKey(name: string): string | null {
     saintclair: 'stclair',
     vanburen: 'vanburen',
     vanburencounty: 'vanburen',
+    arenac: 'arenac',
+    gladwin: 'gladwin',
+    cass: 'cass',
+    oceana: 'oceana',
   }
   if (aliases[n]) return aliases[n]
   const hit = MI_TARGET_COUNTIES.find(
