@@ -68,8 +68,60 @@ export function getBidSteps(auction: string): string[] {
   ]
 }
 
-export function streetViewImageUrl(addr: string, size = '600x400') {
-  const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim()
+function googleMapsApiKey(): string | null {
+  return process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() || null
+}
+
+export function streetViewImageUrl(
+  addr: string,
+  options?: { size?: string; heading?: number }
+) {
+  const key = googleMapsApiKey()
   if (!key) return null
-  return `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(addr)}&key=${key}`
+  const size = options?.size ?? '600x400'
+  const params = new URLSearchParams({
+    size,
+    location: addr,
+    key,
+  })
+  if (options?.heading != null) params.set('heading', String(options.heading))
+  return `https://maps.googleapis.com/maps/api/streetview?${params}`
+}
+
+export function staticMapSatelliteImageUrl(addr: string, size = '600x400') {
+  const key = googleMapsApiKey()
+  if (!key) return null
+  const params = new URLSearchParams({
+    center: addr,
+    zoom: '18',
+    size,
+    maptype: 'satellite',
+    key,
+  })
+  return `https://maps.googleapis.com/maps/api/staticmap?${params}`
+}
+
+export type PropertyPhotoSlide = {
+  id: string
+  label: string
+  src: string
+}
+
+export function propertyPhotoSlides(addr: string, size = '600x400'): PropertyPhotoSlide[] {
+  const slides: PropertyPhotoSlide[] = []
+  const headings: { id: string; label: string; heading: number }[] = [
+    { id: 'sv-front', label: 'Street View — front', heading: 0 },
+    { id: 'sv-right', label: 'Street View — right side', heading: 90 },
+    { id: 'sv-left', label: 'Street View — left side', heading: 270 },
+    { id: 'sv-rear', label: 'Street View — rear', heading: 180 },
+  ]
+  for (const { id, label, heading } of headings) {
+    const src = streetViewImageUrl(addr, { size, heading })
+    if (src) slides.push({ id, label, src })
+  }
+  const satellite = staticMapSatelliteImageUrl(addr, size)
+  if (satellite) {
+    slides.push({ id: 'satellite', label: 'Satellite / aerial', src: satellite })
+  }
+  return slides
 }

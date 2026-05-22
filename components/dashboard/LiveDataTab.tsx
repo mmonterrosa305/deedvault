@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import type { MiamiDadeProperty } from '@/lib/miami-dade-api'
 import { REALFORECLOSE_URL } from '@/lib/miami-dade-api'
 import {
@@ -36,6 +36,7 @@ import {
   type LiveDataFilterState,
 } from '@/lib/live-data-feed'
 import LivePropertyModal from '@/components/listing/LivePropertyModal'
+import LiveFeedPropertyModal from '@/components/listing/LiveFeedPropertyModal'
 import LiveDataLoadProgress from '@/components/dashboard/LiveDataLoadProgress'
 import LiveDataFilters from '@/components/dashboard/LiveDataFilters'
 
@@ -109,7 +110,7 @@ export default function LiveDataTab() {
   const [bid4assetsSearchCount, setBid4assetsSearchCount] = useState(0)
   const [q, setQ] = useState('')
   const [filters, setFilters] = useState<LiveDataFilterState>(defaultLiveDataFilters)
-  const [selected, setSelected] = useState<LiveDataRecord | null>(null)
+  const [selectedFeed, setSelectedFeed] = useState<LiveDataFeedItem | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -428,8 +429,14 @@ export default function LiveDataTab() {
 
   return (
     <div className="px-4 sm:px-6 py-6 max-w-6xl mx-auto">
-      {selected && (
-        <LivePropertyModal record={selected} onClose={() => setSelected(null)} />
+      {selectedFeed?.kind === 'realtdm' && (
+        <LivePropertyModal
+          record={selectedFeed.record}
+          onClose={() => setSelectedFeed(null)}
+        />
+      )}
+      {selectedFeed && selectedFeed.kind !== 'realtdm' && (
+        <LiveFeedPropertyModal item={selectedFeed} onClose={() => setSelectedFeed(null)} />
       )}
       <div className="mb-6">
         <p className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
@@ -612,16 +619,32 @@ export default function LiveDataTab() {
                   <RealTdmCard
                     key={feedItemKey(item)}
                     record={item.record}
-                    onSelect={() => setSelected(item.record)}
+                    onSelect={() => setSelectedFeed(item)}
                   />
                 ) : item.kind === 'govease' ? (
-                  <GovEaseCard key={feedItemKey(item)} listing={item.listing} />
+                  <GovEaseCard
+                    key={feedItemKey(item)}
+                    listing={item.listing}
+                    onSelect={() => setSelectedFeed(item)}
+                  />
                 ) : item.kind === 'bid4assets' ? (
-                  <Bid4AssetsCard key={feedItemKey(item)} listing={item.listing} />
+                  <Bid4AssetsCard
+                    key={feedItemKey(item)}
+                    listing={item.listing}
+                    onSelect={() => setSelectedFeed(item)}
+                  />
                 ) : item.kind === 'sri' ? (
-                  <SriCard key={feedItemKey(item)} listing={item.listing} />
+                  <SriCard
+                    key={feedItemKey(item)}
+                    listing={item.listing}
+                    onSelect={() => setSelectedFeed(item)}
+                  />
                 ) : (
-                  <RealForecloseCard key={feedItemKey(item)} listing={item.listing} />
+                  <RealForecloseCard
+                    key={feedItemKey(item)}
+                    listing={item.listing}
+                    onSelect={() => setSelectedFeed(item)}
+                  />
                 )
               )}
             </div>
@@ -641,6 +664,40 @@ function feedCardStyle(isGoodDeal: boolean): CSSProperties {
 
 function feedCardHoverBorder(isGoodDeal: boolean): string {
   return isGoodDeal ? 'rgba(201,168,76,0.65)' : 'var(--gold-dim)'
+}
+
+function FeedCardShell({
+  isGoodDeal,
+  onSelect,
+  children,
+}: {
+  isGoodDeal: boolean
+  onSelect: () => void
+  children: ReactNode
+}) {
+  return (
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
+      className="rounded-md p-4 transition-all cursor-pointer"
+      style={feedCardStyle(isGoodDeal)}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
+      onMouseLeave={e =>
+        (e.currentTarget.style.borderColor = isGoodDeal
+          ? 'rgba(201,168,76,0.45)'
+          : 'var(--border)')
+      }
+    >
+      {children}
+    </article>
+  )
 }
 
 function GoodDealBadge() {
@@ -713,25 +770,7 @@ function RealTdmCard({
   const ratio = bidToAssessedRatio(openingBid, assessedValue)
   const isGoodDeal = isGoodDealRatio(ratio)
   return (
-    <article
-      role="button"
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onSelect()
-        }
-      }}
-      className="rounded-md p-4 transition-all cursor-pointer"
-      style={feedCardStyle(isGoodDeal)}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
-      onMouseLeave={e =>
-        (e.currentTarget.style.borderColor = isGoodDeal
-          ? 'rgba(201,168,76,0.45)'
-          : 'var(--border)')
-      }
-    >
+    <FeedCardShell isGoodDeal={isGoodDeal} onSelect={onSelect}>
       <OpeningBidHighlight openingBid={openingBid} />
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -834,24 +873,21 @@ function RealTdmCard({
           </a>
         </div>
       </div>
-    </article>
+    </FeedCardShell>
   )
 }
 
-function Bid4AssetsCard({ listing }: { listing: Bid4AssetsListing }) {
+function Bid4AssetsCard({
+  listing,
+  onSelect,
+}: {
+  listing: Bid4AssetsListing
+  onSelect: () => void
+}) {
   const ratio = bidToAssessedRatio(listing.openingBid, null)
   const isGoodDeal = isGoodDealRatio(ratio)
   return (
-    <article
-      className="rounded-md p-4 transition-all"
-      style={feedCardStyle(isGoodDeal)}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
-      onMouseLeave={e =>
-        (e.currentTarget.style.borderColor = isGoodDeal
-          ? 'rgba(201,168,76,0.45)'
-          : 'var(--border)')
-      }
-    >
+    <FeedCardShell isGoodDeal={isGoodDeal} onSelect={onSelect}>
       <OpeningBidHighlight openingBid={listing.openingBid} />
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -917,9 +953,10 @@ function Bid4AssetsCard({ listing }: { listing: Bid4AssetsListing }) {
         <div className="flex flex-col items-end gap-2 flex-shrink-0">
           <AssessedRatioBlock openingBid={listing.openingBid} assessedValue={null} />
           <a
-            href={BID4ASSETS_HOME_URL}
+            href={listing.auctionUrl ?? BID4ASSETS_HOME_URL}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
             className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
             style={{
               background: 'var(--gold-glow)',
@@ -931,24 +968,21 @@ function Bid4AssetsCard({ listing }: { listing: Bid4AssetsListing }) {
           </a>
         </div>
       </div>
-    </article>
+    </FeedCardShell>
   )
 }
 
-function SriCard({ listing }: { listing: SriListing }) {
+function SriCard({
+  listing,
+  onSelect,
+}: {
+  listing: SriListing
+  onSelect: () => void
+}) {
   const ratio = bidToAssessedRatio(listing.openingBid, null)
   const isGoodDeal = isGoodDealRatio(ratio)
   return (
-    <article
-      className="rounded-md p-4 transition-all"
-      style={feedCardStyle(isGoodDeal)}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
-      onMouseLeave={e =>
-        (e.currentTarget.style.borderColor = isGoodDeal
-          ? 'rgba(201,168,76,0.45)'
-          : 'var(--border)')
-      }
-    >
+    <FeedCardShell isGoodDeal={isGoodDeal} onSelect={onSelect}>
       <OpeningBidHighlight openingBid={listing.openingBid} />
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -1014,9 +1048,10 @@ function SriCard({ listing }: { listing: SriListing }) {
         <div className="flex flex-col items-end gap-2 flex-shrink-0">
           <AssessedRatioBlock openingBid={listing.openingBid} assessedValue={null} />
           <a
-            href={SRI_HOME_URL}
+            href={listing.auctionUrl ?? SRI_HOME_URL}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
             className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
             style={{
               background: 'var(--gold-glow)',
@@ -1028,24 +1063,21 @@ function SriCard({ listing }: { listing: SriListing }) {
           </a>
         </div>
       </div>
-    </article>
+    </FeedCardShell>
   )
 }
 
-function RealForecloseCard({ listing }: { listing: RealForecloseListing }) {
+function RealForecloseCard({
+  listing,
+  onSelect,
+}: {
+  listing: RealForecloseListing
+  onSelect: () => void
+}) {
   const ratio = bidToAssessedRatio(listing.openingBid, listing.assessedValue)
   const isGoodDeal = isGoodDealRatio(ratio)
   return (
-    <article
-      className="rounded-md p-4 transition-all"
-      style={feedCardStyle(isGoodDeal)}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
-      onMouseLeave={e =>
-        (e.currentTarget.style.borderColor = isGoodDeal
-          ? 'rgba(201,168,76,0.45)'
-          : 'var(--border)')
-      }
-    >
+    <FeedCardShell isGoodDeal={isGoodDeal} onSelect={onSelect}>
       <OpeningBidHighlight openingBid={listing.openingBid} />
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -1129,6 +1161,7 @@ function RealForecloseCard({ listing }: { listing: RealForecloseListing }) {
             href={listing.auctionUrl}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
             className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
             style={{
               background: 'var(--gold-glow)',
@@ -1140,25 +1173,22 @@ function RealForecloseCard({ listing }: { listing: RealForecloseListing }) {
           </a>
         </div>
       </div>
-    </article>
+    </FeedCardShell>
   )
 }
 
-function GovEaseCard({ listing }: { listing: GovEaseListing }) {
+function GovEaseCard({
+  listing,
+  onSelect,
+}: {
+  listing: GovEaseListing
+  onSelect: () => void
+}) {
   const href = GOVEASE_HOME_URL
   const ratio = bidToAssessedRatio(listing.openingBid, null)
   const isGoodDeal = isGoodDealRatio(ratio)
   return (
-    <article
-      className="rounded-md p-4 transition-all"
-      style={feedCardStyle(isGoodDeal)}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
-      onMouseLeave={e =>
-        (e.currentTarget.style.borderColor = isGoodDeal
-          ? 'rgba(201,168,76,0.45)'
-          : 'var(--border)')
-      }
-    >
+    <FeedCardShell isGoodDeal={isGoodDeal} onSelect={onSelect}>
       <OpeningBidHighlight openingBid={listing.openingBid} />
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -1229,6 +1259,7 @@ function GovEaseCard({ listing }: { listing: GovEaseListing }) {
             href={href}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
             className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
             style={{
               background: 'var(--gold-glow)',
@@ -1240,6 +1271,6 @@ function GovEaseCard({ listing }: { listing: GovEaseListing }) {
           </a>
         </div>
       </div>
-    </article>
+    </FeedCardShell>
   )
 }

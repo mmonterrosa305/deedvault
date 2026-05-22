@@ -1,11 +1,19 @@
 'use client'
 
 import { useEffect } from 'react'
-import { REALFORECLOSE_URL } from '@/lib/miami-dade-api'
 import { fmt } from '@/lib/listings'
 import PropertyPhotoSlideshow from '@/components/listing/PropertyPhotoSlideshow'
-import type { LiveDataRecord } from '@/lib/live-data-merge'
-import { caseUniqueId, countyBaseUrl } from '@/lib/realtdm'
+import {
+  feedItemAssessedValue,
+  feedItemCounty,
+  feedItemKey,
+  feedItemOpeningBid,
+  feedItemState,
+  type LiveDataFeedItem,
+} from '@/lib/live-data-feed'
+import { BID4ASSETS_HOME_URL } from '@/lib/bid4assets'
+import { GOVEASE_HOME_URL } from '@/lib/govease'
+import { SRI_HOME_URL } from '@/lib/sri'
 
 function ModalSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -35,18 +43,75 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function streetViewAddress(address: string): string | null {
+function streetViewAddress(address: string, state: 'FL' | 'MI'): string | null {
   const addr = address.trim()
-  if (!addr || addr === 'Address not available') return null
-  if (/,\s*[A-Z]{2}\b/i.test(addr) || addr.toLowerCase().includes('fl')) return addr
-  return `${addr}, FL`
+  if (!addr || addr === '—' || addr === 'Address not available') return null
+  if (/,\s*[A-Z]{2}\b/i.test(addr)) return addr
+  return `${addr}, ${state}`
 }
 
-type Props = { record: LiveDataRecord; onClose: () => void }
+function feedItemTitle(item: LiveDataFeedItem): string {
+  if (item.kind === 'realtdm') return item.record.case.caseNumber
+  if (item.kind === 'realforeclose') return item.listing.caseNumber
+  if (item.kind === 'govease') return item.listing.parcelNumber ?? item.listing.id
+  if (item.kind === 'bid4assets') return item.listing.auctionTitle ?? item.listing.id
+  return item.listing.parcelNumber ?? item.listing.id
+}
 
-export default function LivePropertyModal({ record, onClose }: Props) {
-  const { case: taxCase, property, displayAddress } = record
-  const viewAddr = streetViewAddress(displayAddress)
+function feedItemAddress(item: LiveDataFeedItem): string {
+  if (item.kind === 'realtdm') return item.record.displayAddress
+  return item.listing.address
+}
+
+function feedItemParcelId(item: LiveDataFeedItem): string {
+  if (item.kind === 'realtdm') return item.record.case.parcelNumber
+  if (item.kind === 'realforeclose') return item.listing.parcelId
+  if (item.kind === 'govease') return item.listing.parcelNumber ?? '—'
+  if (item.kind === 'sri') return item.listing.parcelNumber ?? '—'
+  return '—'
+}
+
+function feedItemAuctionDate(item: LiveDataFeedItem): string {
+  if (item.kind === 'realtdm') return item.record.case.saleDate
+  if (item.kind === 'realforeclose') return item.listing.auctionDateTime || item.listing.auctionDate
+  return item.listing.saleDate
+}
+
+function feedItemSourceLabel(item: LiveDataFeedItem): string {
+  if (item.kind === 'realforeclose') return 'REALFORECLOSE'
+  if (item.kind === 'govease') return 'GOVEASE'
+  if (item.kind === 'bid4assets') return 'BID4ASSETS'
+  return 'SRI'
+}
+
+function feedItemExternalLink(item: LiveDataFeedItem): { href: string; label: string } {
+  if (item.kind === 'realforeclose') {
+    return { href: item.listing.auctionUrl, label: 'VIEW ON REALFORECLOSE →' }
+  }
+  if (item.kind === 'govease') {
+    return { href: GOVEASE_HOME_URL, label: 'VIEW ON GOVEASE →' }
+  }
+  if (item.kind === 'bid4assets') {
+    const href = item.listing.auctionUrl ?? BID4ASSETS_HOME_URL
+    return { href, label: 'VIEW ON BID4ASSETS →' }
+  }
+  if (item.kind === 'sri') {
+    const href = item.listing.auctionUrl ?? SRI_HOME_URL
+    return { href, label: 'VIEW ON SRI →' }
+  }
+  return { href: GOVEASE_HOME_URL, label: 'VIEW ON GOVEASE →' }
+}
+
+type Props = { item: LiveDataFeedItem; onClose: () => void }
+
+export default function LiveFeedPropertyModal({ item, onClose }: Props) {
+  const state = feedItemState(item)
+  const county = feedItemCounty(item)
+  const address = feedItemAddress(item)
+  const openingBid = feedItemOpeningBid(item)
+  const assessedValue = feedItemAssessedValue(item)
+  const viewAddr = streetViewAddress(address, state)
+  const { href: externalHref, label: externalLabel } = feedItemExternalLink(item)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -65,7 +130,7 @@ export default function LivePropertyModal({ record, onClose }: Props) {
       className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="live-property-modal-title"
+      aria-labelledby="live-feed-modal-title"
     >
       <div
         className="absolute inset-0"
@@ -88,14 +153,14 @@ export default function LivePropertyModal({ record, onClose }: Props) {
         >
           <div className="min-w-0 pr-4">
             <p className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
-              {taxCase.caseNumber}
+              {feedItemTitle(item)}
             </p>
             <h2
-              id="live-property-modal-title"
+              id="live-feed-modal-title"
               className="font-display text-xl tracking-wide truncate"
               style={{ color: 'var(--text)' }}
             >
-              {taxCase.county.toUpperCase()} — FL
+              {county.toUpperCase()} — {state}
             </h2>
           </div>
           <button
@@ -123,62 +188,39 @@ export default function LivePropertyModal({ record, onClose }: Props) {
               OPENING BID
             </p>
             <p className="font-display text-3xl tracking-wide" style={{ color: 'var(--gold)' }}>
-              {taxCase.openingBid != null ? fmt(taxCase.openingBid) : '—'}
+              {openingBid != null ? fmt(openingBid) : '—'}
             </p>
             <p className="font-mono text-xs mt-1" style={{ color: 'var(--muted)' }}>
-              {taxCase.status}
+              {feedItemSourceLabel(item)}
             </p>
           </div>
 
           <ModalSection title="PROPERTY PHOTOS">
-            <PropertyPhotoSlideshow
-              address={viewAddr}
-              resetKey={caseUniqueId(taxCase)}
-            />
+            <PropertyPhotoSlideshow address={viewAddr} resetKey={feedItemKey(item)} />
           </ModalSection>
 
-          <ModalSection title="TAX DEED CASE (REALTDM)">
-            <DetailRow label="COUNTY" value={taxCase.county} />
-            <DetailRow label="CASE NUMBER" value={taxCase.caseNumber} />
-            <DetailRow label="PARCEL NUMBER" value={taxCase.parcelNumber} />
-            <DetailRow label="PROPERTY ADDRESS" value={displayAddress} />
-            <DetailRow label="SALE DATE" value={taxCase.saleDate} />
-            <DetailRow label="STATUS" value={taxCase.status} />
+          <ModalSection title="PROPERTY DETAILS">
+            <DetailRow label="PROPERTY ADDRESS" value={address} />
+            <DetailRow label="PARCEL ID" value={feedItemParcelId(item)} />
+            <DetailRow
+              label="ASSESSED VALUE"
+              value={assessedValue != null ? fmt(assessedValue) : '—'}
+            />
             <DetailRow
               label="OPENING BID"
-              value={taxCase.openingBid != null ? fmt(taxCase.openingBid) : '—'}
+              value={openingBid != null ? fmt(openingBid) : '—'}
             />
+            <DetailRow label="AUCTION DATE" value={feedItemAuctionDate(item)} />
+            <DetailRow label="COUNTY" value={county} />
+            <DetailRow label="STATE" value={state} />
           </ModalSection>
 
-          {property && taxCase.countyKey === 'miamidade' && (
-            <ModalSection title="PARCEL RECORD (MIAMI-DADE GIS)">
-              <DetailRow label="FOLIO" value={property.folio} />
-              <DetailRow label="OWNER" value={property.owner1} />
-              <DetailRow
-                label="TOTAL ASSESSED VALUE"
-                value={property.totalValue != null ? fmt(property.totalValue) : '—'}
-              />
-              {property.landValue != null && (
-                <DetailRow label="LAND VALUE" value={fmt(property.landValue)} />
-              )}
-              {property.buildingValue != null && (
-                <DetailRow label="BUILDING VALUE" value={fmt(property.buildingValue)} />
-              )}
-            </ModalSection>
-          )}
-
-          <ModalSection title="AUCTION & TAX DEED">
+          <ModalSection title="AUCTION">
             <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>
-              {taxCase.countyKey === 'miamidade'
-                ? "Search this parcel on Miami-Dade's official tax deed and foreclosure auction site."
-                : `Open ${taxCase.county} County's public RealTDM case search.`}
+              Open this listing on the county auction platform for full case details and bidding.
             </p>
             <a
-              href={
-                taxCase.countyKey === 'miamidade'
-                  ? REALFORECLOSE_URL
-                  : `${countyBaseUrl({ key: taxCase.countyKey, name: taxCase.county, subdomain: taxCase.subdomain })}/public/cases/list`
-              }
+              href={externalHref}
               target="_blank"
               rel="noopener noreferrer"
               className="font-mono text-xs tracking-widest px-4 py-2.5 rounded transition-all inline-block text-center w-full sm:w-auto"
@@ -188,9 +230,7 @@ export default function LivePropertyModal({ record, onClose }: Props) {
                 color: 'var(--gold)',
               }}
             >
-              {taxCase.countyKey === 'miamidade'
-                ? 'VIEW ON REALFORECLOSE →'
-                : 'VIEW ON REALTDM →'}
+              {externalLabel}
             </a>
           </ModalSection>
         </div>
