@@ -15,12 +15,16 @@ import ForeclosurePropertyModal from '@/components/listing/ForeclosurePropertyMo
 import MichiganCountyDirectory from '@/components/dashboard/MichiganCountyDirectory'
 import LiveDataFilters from '@/components/dashboard/LiveDataFilters'
 import LiveDataLoadProgress from '@/components/dashboard/LiveDataLoadProgress'
+import DataFreshnessBar from '@/components/dashboard/DataFreshnessBar'
+import { withRefreshParam } from '@/lib/cached-api'
 
 type ForeclosureRegion = 'florida' | 'michigan'
 type ForeclosureSubTab = 'auctions' | 'pre-foreclosures' | 'lis-pendens'
 type MichiganSubTab = 'auctions' | 'counties'
 
-type AuctionsResponse = {
+type CacheFields = { cachedAt?: number; fromCache?: boolean }
+
+type AuctionsResponse = CacheFields & {
   listings: ForeclosureListing[]
   countyCounts?: { county: string; count: number }[]
   error?: string
@@ -32,7 +36,7 @@ type ListingsResponse = {
   error?: string
 }
 
-type MichiganResponse = {
+type MichiganResponse = CacheFields & {
   listings: ForeclosureListing[]
   sourceCounts: MichiganSourceCounts
   warnings: string[]
@@ -95,6 +99,8 @@ function ForeclosuresTabContent() {
   const [q, setQ] = useState('')
   const [filters, setFilters] = useState<ForeclosureFilterState>(defaultForeclosureFilters)
   const [selectedListing, setSelectedListing] = useState<ForeclosureListing | null>(null)
+  const [flLastUpdatedAt, setFlLastUpdatedAt] = useState<number | null>(null)
+  const [miLastUpdatedAt, setMiLastUpdatedAt] = useState<number | null>(null)
   const miFetchGen = useRef(0)
 
   const syncForeclosuresUrl = useCallback(
@@ -134,9 +140,7 @@ function ForeclosuresTabContent() {
     [syncForeclosuresUrl]
   )
 
-  useEffect(() => {
-    if (flLoaded) return
-    let cancelled = false
+  const loadFlorida = useCallback(async (refresh = false) => {
     setLoadingFl(true)
     setError(null)
     setWarnings([])
@@ -144,21 +148,19 @@ function ForeclosuresTabContent() {
     async function loadAuctions() {
       setLoadingAuctions(true)
       try {
-        const res = await fetch('/api/foreclosures/auctions', { cache: 'no-store' })
+        const res = await fetch(withRefreshParam('/api/foreclosures/auctions', refresh))
         const data = (await res.json()) as AuctionsResponse
-        if (!cancelled) {
-          if (!res.ok) throw new Error(data.error ?? 'Auctions failed')
-          setAuctionListings(data.listings ?? [])
-        }
+        if (!res.ok) throw new Error(data.error ?? 'Auctions failed')
+        setAuctionListings(data.listings ?? [])
         return data
       } catch (err) {
-        if (!cancelled) setAuctionListings([])
+        setAuctionListings([])
         return {
           error: err instanceof Error ? err.message : 'Auctions failed',
           listings: [],
         }
       } finally {
-        if (!cancelled) setLoadingAuctions(false)
+        setLoadingAuctions(false)
       }
     }
 
@@ -167,21 +169,17 @@ function ForeclosuresTabContent() {
       try {
         const res = await fetch('/api/foreclosures/lis-pendens', { cache: 'no-store' })
         const data = (await res.json()) as ListingsResponse
-        if (!cancelled) {
-          if (!res.ok) throw new Error(data.error ?? 'LIS PENDENS failed')
-          setLisListings(data.listings ?? [])
-          if (data.warning) setWarnings(w => [...w, data.warning!])
-        }
+        if (!res.ok) throw new Error(data.error ?? 'LIS PENDENS failed')
+        setLisListings(data.listings ?? [])
+        if (data.warning) setWarnings(w => [...w, data.warning!])
       } catch (err) {
-        if (!cancelled) setLisListings([])
-        if (!cancelled) {
-          setWarnings(w => [
-            ...w,
-            err instanceof Error ? err.message : 'LIS PENDENS failed',
-          ])
-        }
+        setLisListings([])
+        setWarnings(w => [
+          ...w,
+          err instanceof Error ? err.message : 'LIS PENDENS failed',
+        ])
       } finally {
-        if (!cancelled) setLoadingLis(false)
+        setLoadingLis(false)
       }
     }
 
@@ -190,44 +188,39 @@ function ForeclosuresTabContent() {
       try {
         const res = await fetch('/api/foreclosures/pre-foreclosures', { cache: 'no-store' })
         const data = (await res.json()) as ListingsResponse
-        if (!cancelled) {
-          if (!res.ok) throw new Error(data.error ?? 'Pre-foreclosures failed')
-          setPreListings(data.listings ?? [])
-          if (data.warning) setWarnings(w => [...w, data.warning!])
-        }
+        if (!res.ok) throw new Error(data.error ?? 'Pre-foreclosures failed')
+        setPreListings(data.listings ?? [])
+        if (data.warning) setWarnings(w => [...w, data.warning!])
       } catch (err) {
-        if (!cancelled) setPreListings([])
-        if (!cancelled) {
-          setWarnings(w => [
-            ...w,
-            err instanceof Error ? err.message : 'Pre-foreclosures failed',
-          ])
-        }
+        setPreListings([])
+        setWarnings(w => [
+          ...w,
+          err instanceof Error ? err.message : 'Pre-foreclosures failed',
+        ])
       } finally {
-        if (!cancelled) setLoadingPre(false)
+        setLoadingPre(false)
       }
     }
 
-    Promise.all([loadAuctions(), loadLis(), loadPre()]).then(([auctionResult]) => {
-      if (cancelled) return
-      const errs: string[] = []
-      if (auctionResult.error) errs.push(auctionResult.error)
-      if (errs.length > 0) setWarnings(w => [...w, ...errs])
-      setFlLoaded(true)
-      setLoadingFl(false)
-    })
+    const [auctionResult] = await Promise.all([loadAuctions(), loadLis(), loadPre()])
+    const errs: string[] = []
+    if (auctionResult.error) errs.push(auctionResult.error)
+    if (errs.length > 0) setWarnings(w => [...w, ...errs])
+    setFlLastUpdatedAt(auctionResult.cachedAt ?? Date.now())
+    setFlLoaded(true)
+    setLoadingFl(false)
+  }, [])
 
-    return () => {
-      cancelled = true
-    }
-  }, [flLoaded])
+  useEffect(() => {
+    if (!flLoaded) loadFlorida(false)
+  }, [flLoaded, loadFlorida])
 
-  const loadMichigan = useCallback(async () => {
+  const loadMichigan = useCallback(async (refresh = false) => {
     const gen = ++miFetchGen.current
     setLoadingMi(true)
     setMiWarnings([])
     try {
-      const res = await fetch(MICHIGAN_FORECLOSURES_API, { cache: 'no-store' })
+      const res = await fetch(withRefreshParam(MICHIGAN_FORECLOSURES_API, refresh))
       if (!res.ok) {
         const body = await res.text()
         let message = `Michigan foreclosures API returned ${res.status}`
@@ -247,6 +240,7 @@ function ForeclosuresTabContent() {
       setMiListings(data.listings ?? [])
       setMiSourceCounts(data.sourceCounts ?? null)
       setMiWarnings(data.warnings ?? [])
+      setMiLastUpdatedAt(data.cachedAt ?? Date.now())
       setMiLoaded(true)
     } catch (err) {
       if (gen !== miFetchGen.current) return
@@ -263,9 +257,20 @@ function ForeclosuresTabContent() {
 
   useEffect(() => {
     if (region === 'michigan' && !miLoaded && !loadingMi) {
-      loadMichigan()
+      loadMichigan(false)
     }
   }, [region, miLoaded, loadingMi, loadMichigan])
+
+  const freshnessLastUpdated =
+    region === 'michigan' ? miLastUpdatedAt : flLastUpdatedAt
+
+  const handleRefresh = useCallback(() => {
+    if (region === 'michigan') {
+      loadMichigan(true)
+    } else {
+      loadFlorida(true)
+    }
+  }, [region, loadMichigan, loadFlorida])
 
   useEffect(() => {
     if (region === 'michigan') {
@@ -359,6 +364,12 @@ function ForeclosuresTabContent() {
           )}
         </p>
       </div>
+
+      <DataFreshnessBar
+        lastUpdatedAt={freshnessLastUpdated}
+        loading={region === 'michigan' ? loadingMi : loadingFl}
+        onRefresh={handleRefresh}
+      />
 
       <div
         className="flex gap-1 mb-4 border-b overflow-x-auto"

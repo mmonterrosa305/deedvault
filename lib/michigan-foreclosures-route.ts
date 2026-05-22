@@ -1,17 +1,24 @@
-import { NextResponse } from 'next/server'
 import { fetchMichiganForeclosureListings } from '@/lib/michigan-foreclosures'
+import { withCachedApiResponse } from '@/lib/cached-api'
+import { CACHE_TTL_MS } from '@/lib/server-cache'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 180
 
-export async function GET() {
+const CACHE_KEY = 'michigan-foreclosures'
+
+export async function GET(request: Request) {
   try {
-    const result = await fetchMichiganForeclosureListings()
-    return NextResponse.json(result)
+    return await withCachedApiResponse(
+      request,
+      CACHE_KEY,
+      CACHE_TTL_MS.michiganForeclosures,
+      () => fetchMichiganForeclosureListings()
+    )
   } catch (err) {
     const message =
       err instanceof Error ? err.message : 'Michigan foreclosures fetch failed'
-    return NextResponse.json(
+    return Response.json(
       {
         error: message,
         listings: [],
@@ -25,6 +32,8 @@ export async function GET() {
         warnings: [message],
         wayneCatalogTotal: 0,
         taxSaleAuctionGroups: [],
+        cachedAt: Date.now(),
+        fromCache: false,
       },
       { status: 502 }
     )

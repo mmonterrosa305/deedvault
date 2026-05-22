@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { MiamiDadeProperty } from '@/lib/miami-dade-api'
 import { REALFORECLOSE_URL } from '@/lib/miami-dade-api'
 import {
@@ -39,6 +39,11 @@ import LivePropertyModal from '@/components/listing/LivePropertyModal'
 import LiveFeedPropertyModal from '@/components/listing/LiveFeedPropertyModal'
 import LiveDataLoadProgress from '@/components/dashboard/LiveDataLoadProgress'
 import LiveDataFilters from '@/components/dashboard/LiveDataFilters'
+import DataFreshnessBar from '@/components/dashboard/DataFreshnessBar'
+import { withRefreshParam } from '@/lib/cached-api'
+import { oldestCachedAt } from '@/lib/format-data-age'
+
+type CacheFields = { cachedAt?: number; fromCache?: boolean }
 
 type PropertiesResponse = {
   properties: MiamiDadeProperty[]
@@ -46,34 +51,34 @@ type PropertiesResponse = {
   error?: string
 }
 
-type CountyCasesResponse = {
+type CountyCasesResponse = CacheFields & {
   cases: RealTdmCase[]
   totalListed?: number
   detailsEnriched?: number
   error?: string
 }
 
-type GovEaseResponse = {
+type GovEaseResponse = CacheFields & {
   listings: GovEaseListing[]
   sheetCount?: number
   liveCount?: number
   error?: string
 }
 
-type Bid4AssetsResponse = {
+type Bid4AssetsResponse = CacheFields & {
   listings: Bid4AssetsListing[]
   calendarCount?: number
   searchCount?: number
   error?: string
 }
 
-type SriResponse = {
+type SriResponse = CacheFields & {
   listings: SriListing[]
   countyCount?: number
   error?: string
 }
 
-type RealForecloseResponse = {
+type RealForecloseResponse = CacheFields & {
   listings: RealForecloseListing[]
   datesScanned?: number
   datesWithAuctions?: number
@@ -111,15 +116,19 @@ export default function LiveDataTab() {
   const [q, setQ] = useState('')
   const [filters, setFilters] = useState<LiveDataFilterState>(defaultLiveDataFilters)
   const [selectedFeed, setSelectedFeed] = useState<LiveDataFeedItem | null>(null)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null)
+  const loadGen = useRef(0)
 
-  useEffect(() => {
-    let cancelled = false
+  const loadAll = useCallback(async (refresh = false) => {
+    const gen = ++loadGen.current
 
     async function loadCounty(county: (typeof FL_REALTDM_COUNTIES)[number]) {
-      if (cancelled) return { cases: [] as RealTdmCase[], listed: 0, enriched: 0, err: true }
+      if (gen !== loadGen.current) {
+        return { cases: [] as RealTdmCase[], listed: 0, enriched: 0, err: true, cachedAt: undefined }
+      }
 
       try {
-        const res = await fetch(`/api/realtdm/county/${county.key}`)
+        const res = await fetch(withRefreshParam(`/api/realtdm/county/${county.key}`, refresh))
         const data = (await res.json()) as CountyCasesResponse
         if (!res.ok) throw new Error(data.error ?? `${county.name} failed`)
 
@@ -128,11 +137,12 @@ export default function LiveDataTab() {
           listed: data.totalListed ?? 0,
           enriched: data.detailsEnriched ?? 0,
           err: false,
+          cachedAt: data.cachedAt,
         }
       } catch {
-        return { cases: [] as RealTdmCase[], listed: 0, enriched: 0, err: true }
+        return { cases: [] as RealTdmCase[], listed: 0, enriched: 0, err: true, cachedAt: undefined }
       } finally {
-        if (!cancelled) {
+        if (gen === loadGen.current) {
           setLoadedCountyCount(prev => prev + 1)
         }
       }
@@ -144,14 +154,14 @@ export default function LiveDataTab() {
         const res = await fetch('/api/bid4assets')
         const data = (await res.json()) as Bid4AssetsResponse
         if (!res.ok) throw new Error(data.error ?? 'Bid4Assets failed')
-        if (!cancelled) {
+        if (gen === loadGen.current) {
           setBid4assetsListings(data.listings ?? [])
           setBid4assetsCalendarCount(data.calendarCount ?? 0)
           setBid4assetsSearchCount(data.searchCount ?? 0)
         }
         return { ...data, ok: true }
       } catch (err) {
-        if (!cancelled) setBid4assetsListings([])
+        if (gen === loadGen.current) setBid4assetsListings([])
         const message = err instanceof Error ? err.message : 'Bid4Assets fetch failed'
         return {
           ok: false,
@@ -161,7 +171,7 @@ export default function LiveDataTab() {
           searchCount: 0,
         }
       } finally {
-        if (!cancelled) setLoadingBid4Assets(false)
+        if (gen === loadGen.current) setLoadingBid4Assets(false)
       }
     }
 
@@ -171,14 +181,14 @@ export default function LiveDataTab() {
         const res = await fetch('/api/sri')
         const data = (await res.json()) as SriResponse
         if (!res.ok) throw new Error(data.error ?? 'SRI failed')
-        if (!cancelled) setSriListings(data.listings ?? [])
+        if (gen === loadGen.current) setSriListings(data.listings ?? [])
         return { ...data, ok: true }
       } catch (err) {
-        if (!cancelled) setSriListings([])
+        if (gen === loadGen.current) setSriListings([])
         const message = err instanceof Error ? err.message : 'SRI fetch failed'
         return { ok: false, error: message, listings: [], countyCount: 0 }
       } finally {
-        if (!cancelled) setLoadingSri(false)
+        if (gen === loadGen.current) setLoadingSri(false)
       }
     }
 
@@ -186,8 +196,7 @@ export default function LiveDataTab() {
       console.log('Fetching RealForeclose...')
       setLoadingRealForeclose(true)
       try {
-        const res = await fetch('/api/realforeclose', {
-          cache: 'no-store',
+        const res = await fetch(withRefreshParam('/api/realforeclose', refresh), {
           signal: AbortSignal.timeout(300_000),
         })
         const data = (await res.json()) as RealForecloseResponse
@@ -216,28 +225,28 @@ export default function LiveDataTab() {
           countiesWithListings: 0,
         }
       } finally {
-        if (!cancelled) setLoadingRealForeclose(false)
+        if (gen === loadGen.current) setLoadingRealForeclose(false)
       }
     }
 
     async function loadGovEase(): Promise<GovEaseResponse & { ok: boolean }> {
       setLoadingGovEase(true)
       try {
-        const res = await fetch('/api/govease')
+        const res = await fetch(withRefreshParam('/api/govease', refresh))
         const data = (await res.json()) as GovEaseResponse
         if (!res.ok) throw new Error(data.error ?? 'GovEase failed')
-        if (!cancelled) {
+        if (gen === loadGen.current) {
           setGovEaseListings(data.listings ?? [])
           setGovEaseSheetCount(data.sheetCount ?? 0)
           setGovEaseLiveCount(data.liveCount ?? 0)
         }
         return { ...data, ok: true }
       } catch (err) {
-        if (!cancelled) setGovEaseListings([])
+        if (gen === loadGen.current) setGovEaseListings([])
         const message = err instanceof Error ? err.message : 'GovEase fetch failed'
         return { ok: false, error: message, listings: [], sheetCount: 0, liveCount: 0 }
       } finally {
-        if (!cancelled) setLoadingGovEase(false)
+        if (gen === loadGen.current) setLoadingGovEase(false)
       }
     }
 
@@ -302,7 +311,7 @@ export default function LiveDataTab() {
         loadProperties(),
       ])
 
-      if (cancelled) return
+      if (gen !== loadGen.current) return
 
       const properties = propsResult.properties
       const propsOk = propsResult.ok
@@ -368,13 +377,25 @@ export default function LiveDataTab() {
 
       setLoadingParcels(false)
       setLoading(false)
+
+      setLastUpdatedAt(
+        oldestCachedAt([
+          ...countyResults.map(r => r.cachedAt),
+          goveaseResult.cachedAt,
+          realforecloseResult.cachedAt,
+        ]) ?? Date.now()
+      )
     }
 
-    load()
-    return () => {
-      cancelled = true
-    }
+    await load()
   }, [])
+
+  useEffect(() => {
+    loadAll(false)
+    return () => {
+      loadGen.current += 1
+    }
+  }, [loadAll])
 
   const feedItems = useMemo((): LiveDataFeedItem[] => {
     return [
@@ -457,6 +478,12 @@ export default function LiveDataTab() {
             ' (Miami-Dade ArcGIS using county backup endpoint.)'}
         </p>
       </div>
+
+      <DataFreshnessBar
+        lastUpdatedAt={lastUpdatedAt}
+        loading={loading}
+        onRefresh={() => loadAll(true)}
+      />
 
       <div
         className={`flex gap-2 mb-6${loading ? ' opacity-50 pointer-events-none' : ''}`}
