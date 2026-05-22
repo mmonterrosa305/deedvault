@@ -28,14 +28,14 @@ const FETCH_HEADERS = {
 export const FL_REALFORECLOSE_COUNTIES = [
   { key: 'miamidade', name: 'Miami-Dade', subdomain: 'miamidade' },
   { key: 'broward', name: 'Broward', subdomain: 'broward' },
-  { key: 'palmbeach', name: 'Palm Beach', subdomain: 'pbcgov' },
+  { key: 'palmbeach', name: 'Palm Beach', subdomain: 'palmbeach' },
   { key: 'hillsborough', name: 'Hillsborough', subdomain: 'hillsborough' },
   { key: 'pinellas', name: 'Pinellas', subdomain: 'pinellas' },
   { key: 'polk', name: 'Polk', subdomain: 'polk' },
   { key: 'volusia', name: 'Volusia', subdomain: 'volusia' },
   { key: 'marion', name: 'Marion', subdomain: 'marion' },
-  { key: 'lake', name: 'Lake', subdomain: 'lake' },
-  { key: 'osceola', name: 'Osceola', subdomain: 'osceola' },
+  { key: 'lake', name: 'Lake', subdomain: 'lake', hostname: 'lake.realtaxdeed.com' },
+  { key: 'osceola', name: 'Osceola', subdomain: 'osceola', hostname: 'osceola.realtaxdeed.com' },
   { key: 'brevard', name: 'Brevard', subdomain: 'brevard' },
   { key: 'pasco', name: 'Pasco', subdomain: 'pasco' },
   { key: 'manatee', name: 'Manatee', subdomain: 'manatee' },
@@ -87,8 +87,32 @@ type LoadJson = {
   rlist?: string
 }
 
+function countyHostname(county: RealForecloseCounty): string {
+  return 'hostname' in county && county.hostname
+    ? county.hostname
+    : `${county.subdomain}.realforeclose.com`
+}
+
 function countyOrigin(county: RealForecloseCounty): string {
-  return `https://${county.subdomain}.realforeclose.com`
+  return `https://${countyHostname(county)}`
+}
+
+/** RealForeclose / realTaxDeed portal is configured for this county (not redirected to generic RealAuction). */
+async function isCountyPortalActive(county: RealForecloseCounty): Promise<boolean> {
+  const origin = countyOrigin(county)
+  const session = new ForecloseSession()
+  try {
+    const html = await session.fetchText(`${origin}/index.cfm?zaction=AUCTION&Zmethod=PREVIEW`)
+    if (/Online Auction Software Solutions/i.test(html)) return false
+    return (
+      /Auction Calendar/i.test(html) ||
+      html.includes('id="ALB"') ||
+      /RealForeclose/i.test(html) ||
+      /realtaxdeed/i.test(html)
+    )
+  } catch {
+    return false
+  }
 }
 
 function previewUrl(origin: string, auctionDateMmDdYyyy: string): string {
@@ -571,6 +595,10 @@ async function fetchCountyListings(
   county: RealForecloseCounty,
   kind: RealForecloseAuctionKind
 ): Promise<RealForecloseListing[]> {
+  if (!(await isCountyPortalActive(county))) {
+    return []
+  }
+
   const origin = countyOrigin(county)
   const dates = upcomingDates()
   const byId = new Map<string, RealForecloseListing>()
