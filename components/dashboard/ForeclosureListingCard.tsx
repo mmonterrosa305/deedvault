@@ -1,6 +1,6 @@
 'use client'
 
-import { type CSSProperties } from 'react'
+import { type CSSProperties, type KeyboardEvent } from 'react'
 import { fmt } from '@/lib/listings'
 import {
   bidToAssessedRatio,
@@ -94,7 +94,12 @@ const DATE_LABEL: Record<ForeclosureListing['category'], string> = {
   'lis-pendens': 'FILING DATE',
 }
 
-export default function ForeclosureListingCard({ listing }: { listing: ForeclosureListing }) {
+type Props = {
+  listing: ForeclosureListing
+  onSelect?: () => void
+}
+
+export default function ForeclosureListingCard({ listing, onSelect }: Props) {
   const ratio = bidToAssessedRatio(listing.openingBid, listing.estimatedValue)
   const isGoodDeal = isGoodDealRatio(ratio)
   const bidLabel =
@@ -104,9 +109,24 @@ export default function ForeclosureListingCard({ listing }: { listing: Foreclosu
 
   const displayBid = listing.openingBid ?? listing.estimatedValue
 
+  const cardProps = onSelect
+    ? {
+        role: 'button' as const,
+        tabIndex: 0,
+        onClick: onSelect,
+        onKeyDown: (e: KeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onSelect()
+          }
+        },
+        className: 'rounded-md p-4 transition-all cursor-pointer',
+      }
+    : { className: 'rounded-md p-4 transition-all' }
+
   return (
     <article
-      className="rounded-md p-4 transition-all"
+      {...cardProps}
       style={feedCardStyle(isGoodDeal)}
       onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
       onMouseLeave={e =>
@@ -190,6 +210,7 @@ export default function ForeclosureListingCard({ listing }: { listing: Foreclosu
             href={listing.sourceUrl}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
             className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all inline-block text-center"
             style={{
               background: 'var(--gold-glow)',

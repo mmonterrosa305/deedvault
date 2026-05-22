@@ -11,6 +11,7 @@ import {
 } from '@/lib/foreclosure-feed'
 import type { MichiganSourceCounts } from '@/lib/michigan-foreclosures'
 import ForeclosureListingCard from '@/components/dashboard/ForeclosureListingCard'
+import ForeclosurePropertyModal from '@/components/listing/ForeclosurePropertyModal'
 import MichiganCountyDirectory from '@/components/dashboard/MichiganCountyDirectory'
 import LiveDataFilters from '@/components/dashboard/LiveDataFilters'
 import LiveDataLoadProgress from '@/components/dashboard/LiveDataLoadProgress'
@@ -93,6 +94,7 @@ function ForeclosuresTabContent() {
   const [warnings, setWarnings] = useState<string[]>([])
   const [q, setQ] = useState('')
   const [filters, setFilters] = useState<ForeclosureFilterState>(defaultForeclosureFilters)
+  const [selectedListing, setSelectedListing] = useState<ForeclosureListing | null>(null)
   const miFetchGen = useRef(0)
 
   const syncForeclosuresUrl = useCallback(
@@ -271,7 +273,12 @@ function ForeclosuresTabContent() {
     } else {
       setFilters(f => ({ ...f, state: 'FL' }))
     }
+    setSelectedListing(null)
   }, [region])
+
+  useEffect(() => {
+    if (miSubTab !== 'auctions') setSelectedListing(null)
+  }, [miSubTab])
 
   const activeListings = useMemo(() => {
     if (region === 'michigan') return miListings
@@ -498,7 +505,7 @@ function ForeclosuresTabContent() {
         </>
       )}
 
-      {loading && showListings && (
+      {loading && (showListings || showMiDirectory) && (
         <LiveDataLoadProgress
           loadedCount={progressLoaded}
           totalCount={progressTotal}
@@ -587,23 +594,29 @@ function ForeclosuresTabContent() {
           ) : (
             <div className="space-y-3">
               {filtered.map(listing => (
-                <ForeclosureListingCard key={listing.id} listing={listing} />
+                <ForeclosureListingCard
+                  key={listing.id}
+                  listing={listing}
+                  onSelect={
+                    region === 'michigan'
+                      ? () => setSelectedListing(listing)
+                      : undefined
+                  }
+                />
               ))}
             </div>
           )}
         </>
       )}
 
-      {showMiDirectory && <MichiganCountyDirectory />}
-
-      {region === 'michigan' && loadingMi && !miLoaded && (
-        <LiveDataLoadProgress
-          loadedCount={0}
-          totalCount={4}
-          loadingParcels
-          loadingSourceNames={['Bid4Assets', 'SRI', 'Wayne County', 'tax-sale.info']}
+      {selectedListing && region === 'michigan' && (
+        <ForeclosurePropertyModal
+          listing={selectedListing}
+          onClose={() => setSelectedListing(null)}
         />
       )}
+
+      {showMiDirectory && <MichiganCountyDirectory />}
     </div>
   )
 }
