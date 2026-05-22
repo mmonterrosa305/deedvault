@@ -7,7 +7,7 @@ export type ForeclosureListing = {
   category: ForeclosureCategory
   county: string
   countyKey: string
-  state: 'FL'
+  state: 'FL' | 'MI'
   address: string
   caseNumber: string
   parcelId: string
