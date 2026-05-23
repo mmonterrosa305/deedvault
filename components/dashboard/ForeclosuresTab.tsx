@@ -340,7 +340,7 @@ function ForeclosuresTabContent() {
             ? 'FLORIDA · REALFORECLOSE + MIAMI-DADE CLERK'
             : 'MICHIGAN · TAX DEED + CIRCUIT COURT FORECLOSURES'}
         </p>
-        <h2 className="font-display text-3xl tracking-wide mt-1" style={{ color: 'var(--text)' }}>
+        <h2 className="font-display text-2xl sm:text-3xl tracking-wide mt-1" style={{ color: 'var(--text)' }}>
           FORECLOSURES
         </h2>
         <p className="font-mono text-xs mt-2 max-w-2xl" style={{ color: 'var(--muted)' }}>
@@ -609,7 +609,7 @@ function ForeclosuresTabContent() {
               )}
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {filtered.map(listing => (
                 <ForeclosureListingCard
                   key={listing.id}

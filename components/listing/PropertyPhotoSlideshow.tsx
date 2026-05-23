@@ -15,9 +15,11 @@ function probeImage(src: string): Promise<boolean> {
 type Props = {
   address: string | null
   resetKey?: string
+  /** Edge-to-edge on small screens (e.g. inside modals). */
+  mobileFullBleed?: boolean
 }
 
-export default function PropertyPhotoSlideshow({ address, resetKey }: Props) {
+export default function PropertyPhotoSlideshow({ address, resetKey, mobileFullBleed }: Props) {
   const candidates = useMemo(
     () => (address ? propertyPhotoSlides(address) : []),
     [address]
@@ -100,17 +102,17 @@ export default function PropertyPhotoSlideshow({ address, resetKey }: Props) {
   const showNav = slides.length > 1
 
   return (
-    <div>
+    <div className={mobileFullBleed ? '-mx-4 sm:mx-0 w-[calc(100%+2rem)] sm:w-full' : ''}>
       <div
-        className="relative rounded-md overflow-hidden"
-        style={{ border: '1px solid var(--border)' }}
+        className="relative overflow-hidden sm:rounded-md"
+        style={{ border: mobileFullBleed ? 'none' : '1px solid var(--border)' }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           key={current.id}
           src={current.src}
           alt=""
-          className="w-full h-48 sm:h-56 object-cover"
+          className="w-full h-52 sm:h-56 md:h-60 object-cover"
         />
         {showNav && (
           <>

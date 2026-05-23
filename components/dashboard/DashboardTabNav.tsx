@@ -36,10 +36,10 @@ export default function DashboardTabNav() {
 
   return (
     <div
-      className="sticky top-14 z-40 border-b overflow-x-auto"
-      style={{ background: 'rgba(10,10,10,0.97)', borderColor: 'var(--border)', backdropFilter: 'blur(12px)' }}
+      className="sticky top-14 z-40 border-b overflow-x-auto overscroll-x-contain"
+      style={{ background: 'rgba(10,10,10,0.97)', borderColor: 'var(--border)', backdropFilter: 'blur(12px)', WebkitOverflowScrolling: 'touch' }}
     >
-      <div className="flex gap-1 px-4 min-w-max">
+      <div className="flex flex-nowrap gap-1 px-3 sm:px-4 min-w-max">
         {TABS.map(tab => {
           const active = activeTab === tab.id
           const liveStyle = LIVE_STYLE_TABS.includes(tab.id)
@@ -54,7 +54,7 @@ export default function DashboardTabNav() {
               key={tab.id}
               type="button"
               onClick={() => selectTab(tab.id)}
-              className="font-mono text-xs tracking-widest px-4 py-3 transition-all whitespace-nowrap flex items-center gap-2"
+              className="font-mono text-xs tracking-widest px-3 sm:px-4 py-3 transition-all whitespace-nowrap flex-shrink-0 flex items-center gap-2"
               style={{
                 color: liveStyle
                   ? active

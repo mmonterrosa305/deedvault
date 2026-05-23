@@ -41,12 +41,12 @@ export default function AlertsTab() {
 
   return (
     <div className="px-4 sm:px-6 py-6 max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <p className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>ALERT RULES</p>
           <p className="font-mono text-xs mt-1" style={{ color: 'var(--muted)' }}>Get notified when new listings match your criteria</p>
         </div>
-        <button type="button" onClick={() => setShowForm(!showForm)} className="font-mono text-xs tracking-widest px-4 py-2 rounded" style={{ background: 'var(--gold)', color: '#0a0a0a', border: 'none', cursor: 'pointer' }}>
+        <button type="button" onClick={() => setShowForm(!showForm)} className="font-mono text-xs tracking-widest px-4 py-2 rounded w-full sm:w-auto" style={{ background: 'var(--gold)', color: '#0a0a0a', border: 'none', cursor: 'pointer' }}>
           {showForm ? 'CANCEL' : '+ NEW ALERT'}
         </button>
       </div>

@@ -24,7 +24,7 @@ export default function DataFreshnessBar({ lastUpdatedAt, loading, onRefresh }: 
   )
 
   return (
-    <div className="flex flex-wrap items-center gap-3 mb-4">
+    <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4">
       {lastUpdatedAt != null && !loading && ageLabel && (
         <p className="font-mono text-xs" style={{ color: 'var(--muted)' }}>
           Last updated {ageLabel}
@@ -34,7 +34,7 @@ export default function DataFreshnessBar({ lastUpdatedAt, loading, onRefresh }: 
         type="button"
         onClick={onRefresh}
         disabled={loading}
-        className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all"
+        className="font-mono text-xs tracking-widest px-4 py-2 rounded transition-all w-full sm:w-auto"
         style={{
           background: loading ? 'var(--panel)' : 'var(--gold-glow)',
           border: `1px solid ${loading ? 'var(--border)' : 'rgba(201,168,76,0.35)'}`,

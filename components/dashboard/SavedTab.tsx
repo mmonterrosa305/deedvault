@@ -13,8 +13,8 @@ export default function SavedTab() {
 
   if (saved.length === 0) {
     return (
-      <div className="px-6 py-16 max-w-2xl mx-auto text-center">
-        <p className="font-display text-4xl tracking-wide mb-2" style={{ color: 'var(--muted)' }}>NO SAVED PROPERTIES</p>
+      <div className="px-4 py-16 max-w-2xl mx-auto text-center">
+        <p className="font-display text-3xl sm:text-4xl tracking-wide mb-2" style={{ color: 'var(--muted)' }}>NO SAVED PROPERTIES</p>
         <p className="font-mono text-xs" style={{ color: 'var(--muted)' }}>
           Click SAVE on any listing in Search to add it here.
         </p>

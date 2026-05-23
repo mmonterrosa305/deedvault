@@ -617,7 +617,7 @@ function LiveDataTabContent() {
             ? 'FLORIDA · REALTDM + GOVEASE + REALFORECLOSE'
             : 'MICHIGAN · BID4ASSETS + SRI + TAX-SALE.INFO + WAYNE'}
         </p>
-        <h2 className="font-display text-3xl tracking-wide mt-1" style={{ color: 'var(--text)' }}>
+        <h2 className="font-display text-2xl sm:text-3xl tracking-wide mt-1" style={{ color: 'var(--text)' }}>
           LIVE TAX DEED CASES
         </h2>
         <p className="font-mono text-xs mt-2 max-w-2xl" style={{ color: 'var(--muted)' }}>
@@ -857,7 +857,7 @@ function LiveDataTabContent() {
               )}
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {region === 'michigan' &&
                 filteredMiTaxDeeds.map(listing => (
                   <ForeclosureListingCard
@@ -938,7 +938,7 @@ function FeedCardShell({
           onSelect()
         }
       }}
-      className="rounded-md p-4 transition-all cursor-pointer"
+      className="rounded-md p-4 transition-all cursor-pointer h-full min-w-0"
       style={feedCardStyle(isGoodDeal)}
       onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
       onMouseLeave={e =>

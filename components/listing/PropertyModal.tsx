@@ -53,14 +53,14 @@ export default function PropertyModal({ listing, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4"
+      className="fixed inset-0 z-[100] flex flex-col sm:flex-row sm:items-center sm:justify-center p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="property-modal-title"
     >
       <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.82)', animation: 'modalOverlayIn 0.2s ease-out' }} onClick={onClose} />
       <div
-        className="relative w-full sm:max-w-2xl max-h-[92vh] sm:max-h-[88vh] flex flex-col rounded-t-lg sm:rounded-lg overflow-hidden"
+        className="relative w-full h-full max-h-full flex flex-col overflow-hidden rounded-none sm:rounded-lg sm:h-auto sm:max-w-2xl sm:max-h-[88vh]"
         style={{ background: '#111', border: '1px solid var(--border-bright)', boxShadow: '0 -8px 40px rgba(0,0,0,0.6)', animation: 'modalSlideUp 0.3s ease-out' }}
         onClick={e => e.stopPropagation()}
       >

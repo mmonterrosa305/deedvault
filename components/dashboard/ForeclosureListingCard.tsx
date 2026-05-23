@@ -120,9 +120,9 @@ export default function ForeclosureListingCard({ listing, onSelect }: Props) {
             onSelect()
           }
         },
-        className: 'rounded-md p-4 transition-all cursor-pointer',
+        className: 'rounded-md p-4 transition-all cursor-pointer h-full min-w-0',
       }
-    : { className: 'rounded-md p-4 transition-all' }
+    : { className: 'rounded-md p-4 transition-all h-full min-w-0' }
 
   return (
     <article

@@ -96,16 +96,16 @@ export default function AgentTab() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)] max-w-4xl mx-auto px-4 sm:px-6">
-      <div className="py-4 border-b flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
+    <div className="flex flex-col min-h-0 h-[calc(100dvh-7rem)] max-w-4xl mx-auto px-3 sm:px-6 w-full">
+      <div className="py-3 sm:py-4 border-b flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
         <p className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>DEEDVAULT AGENT</p>
         <p className="font-mono text-xs mt-1" style={{ color: 'var(--muted)' }}>Tax deed Q&A · county rules · property analysis</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-4 space-y-4 min-h-0">
+      <div className="flex-1 overflow-y-auto py-3 sm:py-4 space-y-3 sm:space-y-4 min-h-0">
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className="max-w-[85%] rounded-md px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap" style={{
+            <div className="max-w-[min(100%,20rem)] sm:max-w-[85%] rounded-md px-3 sm:px-4 py-2.5 sm:py-3 text-sm leading-relaxed whitespace-pre-wrap break-words" style={{
               background: m.role === 'user' ? 'var(--gold-glow)' : 'var(--panel)',
               border: `1px solid ${m.role === 'user' ? 'rgba(201,168,76,0.3)' : 'var(--border)'}`,
               color: 'var(--text)',
@@ -121,17 +121,17 @@ export default function AgentTab() {
         <div ref={bottomRef} />
       </div>
 
-      <div className="flex gap-2 flex-wrap pb-2 flex-shrink-0">
+      <div className="flex gap-2 overflow-x-auto pb-2 flex-shrink-0 flex-nowrap -mx-1 px-1">
         {SUGGESTIONS.map(s => (
-          <button key={s} type="button" onClick={() => send(s)} className="font-mono text-[10px] px-2 py-1 rounded" style={{ border: '1px solid var(--border)', color: 'var(--muted)', background: 'transparent', cursor: 'pointer' }}>
+          <button key={s} type="button" onClick={() => send(s)} className="font-mono text-[10px] px-2 py-1 rounded flex-shrink-0 whitespace-nowrap" style={{ border: '1px solid var(--border)', color: 'var(--muted)', background: 'transparent', cursor: 'pointer' }}>
             {s}
           </button>
         ))}
       </div>
 
-      <form onSubmit={e => { e.preventDefault(); send() }} className="flex gap-2 pb-6 flex-shrink-0">
-        <input value={input} onChange={e => setInput(e.target.value)} placeholder="Ask about tax deeds, counties, or a property..." className="flex-1" style={{ height: '44px' }} disabled={loading} />
-        <button type="submit" disabled={loading} className="font-mono text-xs tracking-widest px-5 rounded" style={{ background: loading ? 'var(--gold-dim)' : 'var(--gold)', color: '#0a0a0a', border: 'none', cursor: loading ? 'not-allowed' : 'pointer', height: '44px' }}>SEND</button>
+      <form onSubmit={e => { e.preventDefault(); send() }} className="flex gap-2 pb-4 sm:pb-6 flex-shrink-0">
+        <input value={input} onChange={e => setInput(e.target.value)} placeholder="Ask about tax deeds, counties, or a property..." className="flex-1 min-w-0 text-base sm:text-sm" style={{ height: '44px' }} disabled={loading} />
+        <button type="submit" disabled={loading} className="font-mono text-xs tracking-widest px-4 sm:px-5 rounded flex-shrink-0" style={{ background: loading ? 'var(--gold-dim)' : 'var(--gold)', color: '#0a0a0a', border: 'none', cursor: loading ? 'not-allowed' : 'pointer', height: '44px' }}>SEND</button>
       </form>
     </div>
   )

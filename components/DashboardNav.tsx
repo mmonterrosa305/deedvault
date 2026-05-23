@@ -16,7 +16,7 @@ export default function DashboardNav({ email }: { email: string }) {
 
   return (
     <nav
-      className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 h-14"
+      className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 sm:px-6 h-14"
       style={{
         background: 'rgba(10,10,10,0.95)',
         borderBottom: '1px solid var(--border)',
@@ -30,7 +30,7 @@ export default function DashboardNav({ email }: { email: string }) {
             <path d="M8 1L2 4v4c0 3.3 2.5 6.4 6 7.2C11.5 14.4 14 11.3 14 8V4L8 1zm0 2.2l4 2V8c0 2.4-1.8 4.6-4 5.4C5.8 12.6 4 10.4 4 8V5.2l4-2z"/>
           </svg>
         </div>
-        <span className="font-display text-lg tracking-widest">
+        <span className="font-display text-base sm:text-lg tracking-widest">
           DEED<span style={{ color: 'var(--gold)' }}>VAULT</span>
         </span>
       </div>

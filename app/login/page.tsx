@@ -44,29 +44,29 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative z-10 min-h-screen flex items-center justify-center px-4">
+    <div className="relative z-10 min-h-screen flex items-center justify-center px-4 py-8 sm:py-12">
 
       {/* Logo top-left */}
-      <div className="absolute top-6 left-8 flex items-center gap-2">
+      <div className="absolute top-4 left-4 sm:top-6 sm:left-8 flex items-center gap-2">
         <div className="w-7 h-7 rounded flex items-center justify-center" style={{ background: 'var(--gold)' }}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="#0a0a0a">
             <path d="M8 1L2 4v4c0 3.3 2.5 6.4 6 7.2C11.5 14.4 14 11.3 14 8V4L8 1zm0 2.2l4 2V8c0 2.4-1.8 4.6-4 5.4C5.8 12.6 4 10.4 4 8V5.2l4-2z"/>
           </svg>
         </div>
-        <span className="font-display text-xl tracking-widest text-vault-text">
+        <span className="font-display text-lg sm:text-xl tracking-widest text-vault-text">
           DEED<span style={{ color: 'var(--gold)' }}>VAULT</span>
         </span>
       </div>
 
       {/* Login card */}
-      <div className="w-full max-w-sm">
+      <div className="w-full max-w-sm mx-auto px-1 sm:px-0">
 
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-6 sm:mb-8">
           <p className="font-mono text-xs tracking-widest mb-3" style={{ color: 'var(--gold)' }}>
             TAX DEED INTELLIGENCE
           </p>
-          <h1 className="font-display text-5xl tracking-wide text-vault-text leading-none">
+          <h1 className="font-display text-4xl sm:text-5xl tracking-wide text-vault-text leading-none">
             ACCESS<br />THE VAULT
           </h1>
         </div>
