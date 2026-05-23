@@ -7,7 +7,7 @@ import {
   formatBidToAssessedPct,
   isGoodDealRatio,
 } from '@/lib/foreclosure-feed'
-import type { ForeclosureListing } from '@/lib/foreclosure-listing'
+import { listingTypeLabel, type ForeclosureListing } from '@/lib/foreclosure-listing'
 
 function feedCardStyle(isGoodDeal: boolean): CSSProperties {
   return {
@@ -190,12 +190,12 @@ export default function ForeclosureListingCard({ listing, onSelect }: Props) {
                 <p className="font-mono text-xs mt-0.5">{fmt(listing.estimatedValue)}</p>
               </div>
             )}
-            {listing.auctionType && (
+            {listingTypeLabel(listing) && (
               <div>
                 <p className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--muted)' }}>
                   TYPE
                 </p>
-                <p className="font-mono text-xs mt-0.5">{listing.auctionType}</p>
+                <p className="font-mono text-xs mt-0.5">{listingTypeLabel(listing)}</p>
               </div>
             )}
           </div>

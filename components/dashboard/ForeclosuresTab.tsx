@@ -7,6 +7,7 @@ import {
   collectForeclosureCounties,
   defaultForeclosureFilters,
   filterAndSortForeclosureListings,
+  filterForeclosureTabListings,
   type ForeclosureFilterState,
 } from '@/lib/foreclosure-feed'
 import type { MichiganSourceCounts } from '@/lib/michigan-foreclosures'
@@ -286,10 +287,12 @@ function ForeclosuresTabContent() {
   }, [miSubTab])
 
   const activeListings = useMemo(() => {
-    if (region === 'michigan') return miListings
-    if (subTab === 'auctions') return auctionListings
-    if (subTab === 'pre-foreclosures') return preListings
-    return lisListings
+    let list: ForeclosureListing[]
+    if (region === 'michigan') list = miListings
+    else if (subTab === 'auctions') list = auctionListings
+    else if (subTab === 'pre-foreclosures') list = preListings
+    else list = lisListings
+    return filterForeclosureTabListings(list)
   }, [region, subTab, auctionListings, preListings, lisListings, miListings])
 
   const availableCounties = useMemo(
@@ -380,7 +383,7 @@ function ForeclosuresTabContent() {
           const count =
             tab.id === 'florida'
               ? auctionListings.length + preListings.length + lisListings.length
-              : miListings.length
+              : filterForeclosureTabListings(miListings).length
           return (
             <button
               key={tab.id}
@@ -399,7 +402,9 @@ function ForeclosuresTabContent() {
                 <span className="ml-2 opacity-80">({count})</span>
               )}
               {miLoaded && tab.id === 'michigan' && (
-                <span className="ml-2 opacity-80">({miListings.length})</span>
+                <span className="ml-2 opacity-80">
+                  ({filterForeclosureTabListings(miListings).length})
+                </span>
               )}
             </button>
           )
@@ -447,7 +452,8 @@ function ForeclosuresTabContent() {
         >
           {MI_SUB_TABS.map(tab => {
             const active = miSubTab === tab.id
-            const count = tab.id === 'auctions' ? miListings.length : 20
+            const count =
+              tab.id === 'auctions' ? filterForeclosureTabListings(miListings).length : 20
             return (
               <button
                 key={tab.id}
@@ -597,8 +603,8 @@ function ForeclosuresTabContent() {
               )}
               {region === 'michigan' && totalDisplayed === 0 && (
                 <p className="font-mono text-xs mt-2 max-w-md mx-auto">
-                  Many Michigan counties only publish lists 30 days before the sale. Open the County
-                  Sources tab for treasurer and circuit court links.
+                  Michigan tax deed and forfeiture auctions are on the Tax Deeds tab. Open County
+                  Sources here for treasurer and circuit court links.
                 </p>
               )}
             </div>

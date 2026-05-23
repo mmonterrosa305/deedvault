@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import { fmt } from '@/lib/listings'
 import PropertyPhotoSlideshow from '@/components/listing/PropertyPhotoSlideshow'
-import type { ForeclosureListing } from '@/lib/foreclosure-listing'
+import { listingTypeLabel, type ForeclosureListing } from '@/lib/foreclosure-listing'
 
 function ModalSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -153,8 +153,8 @@ export default function ForeclosurePropertyModal({ listing, onClose }: Props) {
               value={listing.openingBid != null ? fmt(listing.openingBid) : '—'}
             />
             <DetailRow label={DATE_LABEL[listing.category]} value={listing.eventDateDisplay} />
-            {listing.auctionType && (
-              <DetailRow label="TYPE" value={listing.auctionType} />
+            {listingTypeLabel(listing) && (
+              <DetailRow label="TYPE" value={listingTypeLabel(listing)!} />
             )}
             <DetailRow label="COUNTY" value={listing.county} />
             <DetailRow label="STATE" value={listing.state} />

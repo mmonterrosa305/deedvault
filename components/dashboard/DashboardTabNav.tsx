@@ -24,9 +24,12 @@ export default function DashboardTabNav() {
     setActiveTab(tab)
     const params = new URLSearchParams(searchParams.toString())
     params.set('tab', tab)
-    if (tab !== 'foreclosures') {
+    if (tab !== 'foreclosures' && tab !== 'live') {
       params.delete('region')
       params.delete('miTab')
+    }
+    if (tab === 'live' && !params.get('region')) {
+      params.set('region', 'florida')
     }
     router.replace(`/dashboard?${params.toString()}`, { scroll: false })
   }

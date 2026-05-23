@@ -4,7 +4,7 @@
  * @see https://onlineservices.miamidadeclerk.gov/officialrecords
  */
 
-import type { ForeclosureListing } from '@/lib/foreclosure-listing'
+import { SALE_KIND_FORECLOSURE, type ForeclosureListing } from '@/lib/foreclosure-listing'
 import { MIAMI_DADE_OFFICIAL_RECORDS_URL } from '@/lib/foreclosure-listing'
 
 const CLERK_API = 'https://onlineservices.miamidadeclerk.gov/officialrecords/api'
@@ -143,7 +143,8 @@ export function clerkRowToListing(
     estimatedValue: parseMoney(row.legaL_DESCRIPTION ?? ''),
     eventDate: iso || '—',
     eventDateDisplay: formatRecDateDisplay(iso, row.reC_DATE),
-    auctionType: row.doC_TYPE?.trim() || null,
+    auctionType: SALE_KIND_FORECLOSURE,
+    auctionSubtype: row.doC_TYPE?.trim() || null,
     sourceUrl: MIAMI_DADE_OFFICIAL_RECORDS_URL,
     sourceLabel: 'Miami-Dade Clerk Official Records',
   }

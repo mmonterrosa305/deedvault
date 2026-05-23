@@ -13,6 +13,8 @@ type Props = {
   filters: LiveDataFilterState
   counties: string[]
   disabled?: boolean
+  /** Hide state picker when FL/MI region tabs control state. */
+  hideStateFilter?: boolean
   onChange: (filters: LiveDataFilterState) => void
   onReset: () => void
 }
@@ -69,6 +71,7 @@ export default function LiveDataFilters({
   filters,
   counties,
   disabled,
+  hideStateFilter,
   onChange,
   onReset,
 }: Props) {
@@ -77,7 +80,7 @@ export default function LiveDataFilters({
     filters.maxOpeningBid < LIVE_DATA_MAX_OPENING_BID ||
     filters.maxBidToAssessedPct < LIVE_DATA_MAX_RATIO_PCT ||
     filters.county !== '' ||
-    filters.state !== 'all' ||
+    (!hideStateFilter && filters.state !== 'all') ||
     filters.sort !== 'date'
 
   return (
@@ -154,28 +157,30 @@ export default function LiveDataFilters({
             ))}
           </select>
         </div>
-        <div>
-          <p
-            className="font-mono text-[10px] tracking-widest mb-2"
-            style={{ color: 'var(--gold)' }}
-          >
-            STATE
-          </p>
-          <select
-            value={filters.state}
-            disabled={disabled}
-            onChange={e => {
-              const state = e.target.value as LiveDataStateFilter
-              set({ state, county: '' })
-            }}
-            className="w-full font-mono text-xs px-3 py-2 rounded"
-            style={{ height: '42px' }}
-          >
-            <option value="all">All</option>
-            <option value="FL">FL</option>
-            <option value="MI">MI</option>
-          </select>
-        </div>
+        {!hideStateFilter && (
+          <div>
+            <p
+              className="font-mono text-[10px] tracking-widest mb-2"
+              style={{ color: 'var(--gold)' }}
+            >
+              STATE
+            </p>
+            <select
+              value={filters.state}
+              disabled={disabled}
+              onChange={e => {
+                const state = e.target.value as LiveDataStateFilter
+                set({ state, county: '' })
+              }}
+              className="w-full font-mono text-xs px-3 py-2 rounded"
+              style={{ height: '42px' }}
+            >
+              <option value="all">All</option>
+              <option value="FL">FL</option>
+              <option value="MI">MI</option>
+            </select>
+          </div>
+        )}
         <div>
           <p
             className="font-mono text-[10px] tracking-widest mb-2"

@@ -4,7 +4,10 @@
 
 import type { Bid4AssetsListing } from '@/lib/bid4assets'
 import { fetchMichiganBid4AssetsListings } from '@/lib/bid4assets'
-import type { ForeclosureListing } from '@/lib/foreclosure-listing'
+import {
+  SALE_KIND_TAXDEED,
+  type ForeclosureListing,
+} from '@/lib/foreclosure-listing'
 import { MI_TARGET_COUNTIES } from '@/lib/michigan-counties'
 import type { SriListing } from '@/lib/sri'
 import { fetchMichiganSriListings } from '@/lib/sri'
@@ -48,7 +51,8 @@ function bid4AssetsToListing(row: Bid4AssetsListing): ForeclosureListing {
     estimatedValue: null,
     eventDate: row.saleDate,
     eventDateDisplay: row.saleDate,
-    auctionType: row.source === 'calendar' ? 'Scheduled auction' : 'Tax deed auction',
+    auctionType: SALE_KIND_TAXDEED,
+    auctionSubtype: row.source === 'calendar' ? 'Scheduled auction' : 'Tax deed auction',
     sourceUrl: row.auctionUrl ?? 'https://www.bid4assets.com/taxsale',
     sourceLabel: 'Bid4Assets',
   }
@@ -68,7 +72,8 @@ function sriToListing(row: SriListing): ForeclosureListing {
     estimatedValue: null,
     eventDate: row.saleDate,
     eventDateDisplay: row.saleDate,
-    auctionType: row.saleType ?? 'Tax deed',
+    auctionType: SALE_KIND_TAXDEED,
+    auctionSubtype: row.saleType ?? 'Tax deed',
     sourceUrl: row.auctionUrl,
     sourceLabel: 'SRI',
   }
@@ -88,7 +93,8 @@ function wayneToListing(row: WayneAuctionListing): ForeclosureListing {
     estimatedValue: null,
     eventDate: row.saleDate,
     eventDateDisplay: row.saleDateDisplay,
-    auctionType: `Tax foreclosure · ${row.statusCode}`,
+    auctionType: SALE_KIND_TAXDEED,
+    auctionSubtype: `Tax foreclosure · ${row.statusCode}`,
     sourceUrl: row.auctionUrl,
     sourceLabel: 'Wayne Treasurer',
   }
@@ -115,7 +121,8 @@ function taxSaleToListing(row: TaxSaleListing): ForeclosureListing {
     estimatedValue: null,
     eventDate: row.saleDate,
     eventDateDisplay: row.saleDateDisplay,
-    auctionType: `Tax forfeiture · ${row.auctionGroup}`,
+    auctionType: SALE_KIND_TAXDEED,
+    auctionSubtype: `Tax forfeiture · ${row.auctionGroup}`,
     sourceUrl: row.lotUrl,
     sourceLabel: 'tax-sale.info',
   }

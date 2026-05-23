@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import type { MiamiDadeProperty } from '@/lib/miami-dade-api'
 import { REALFORECLOSE_URL } from '@/lib/miami-dade-api'
 import {
@@ -19,9 +20,18 @@ import {
 } from '@/lib/govease'
 import { SRI_HOME_URL, type SriListing } from '@/lib/sri'
 import {
+  REALFORECLOSE_SALE_TAXDEED,
   type RealForecloseCountyCount,
   type RealForecloseListing,
 } from '@/lib/realforeclose'
+import type { ForeclosureListing } from '@/lib/foreclosure-listing'
+import {
+  collectForeclosureCounties,
+  filterAndSortForeclosureListings,
+  filterTaxDeedTabListings,
+} from '@/lib/foreclosure-feed'
+import ForeclosureListingCard from '@/components/dashboard/ForeclosureListingCard'
+import ForeclosurePropertyModal from '@/components/listing/ForeclosurePropertyModal'
 import { fmt } from '@/lib/listings'
 import { mergeLiveData, type LiveDataRecord } from '@/lib/live-data-merge'
 import {
@@ -29,6 +39,7 @@ import {
   collectFeedCounties,
   defaultLiveDataFilters,
   feedItemKey,
+  feedItemState,
   filterAndSortFeedItems,
   formatBidToAssessedPct,
   isGoodDealRatio,
@@ -88,12 +99,36 @@ type RealForecloseResponse = CacheFields & {
   error?: string
 }
 
-export default function LiveDataTab() {
+type MichiganTaxDeedResponse = CacheFields & {
+  listings: ForeclosureListing[]
+  error?: string
+}
+
+const MI_TAX_DEED_EXTRA_SOURCES = new Set(['tax-sale.info', 'Wayne Treasurer'])
+
+type TaxDeedsRegion = 'florida' | 'michigan'
+
+const REGION_TABS: { id: TaxDeedsRegion; label: string }[] = [
+  { id: 'florida', label: 'Florida' },
+  { id: 'michigan', label: 'Michigan' },
+]
+
+function parseRegionParam(value: string | null): TaxDeedsRegion | null {
+  if (value === 'florida' || value === 'michigan') return value
+  return null
+}
+
+function LiveDataTabContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const [region, setRegion] = useState<TaxDeedsRegion>('florida')
   const [records, setRecords] = useState<LiveDataRecord[]>([])
   const [goveaseListings, setGovEaseListings] = useState<GovEaseListing[]>([])
   const [bid4assetsListings, setBid4assetsListings] = useState<Bid4AssetsListing[]>([])
   const [sriListings, setSriListings] = useState<SriListing[]>([])
   const [realforecloseListings, setRealforecloseListings] = useState<RealForecloseListing[]>([])
+  const [miTaxDeedListings, setMiTaxDeedListings] = useState<ForeclosureListing[]>([])
+  const [loadingMiTaxDeeds, setLoadingMiTaxDeeds] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [propertySource, setPropertySource] = useState<'primary' | 'fallback' | null>(null)
@@ -114,10 +149,47 @@ export default function LiveDataTab() {
   const [bid4assetsCalendarCount, setBid4assetsCalendarCount] = useState(0)
   const [bid4assetsSearchCount, setBid4assetsSearchCount] = useState(0)
   const [q, setQ] = useState('')
-  const [filters, setFilters] = useState<LiveDataFilterState>(defaultLiveDataFilters)
+  const [filters, setFilters] = useState<LiveDataFilterState>({
+    ...defaultLiveDataFilters,
+    state: 'FL',
+  })
   const [selectedFeed, setSelectedFeed] = useState<LiveDataFeedItem | null>(null)
+  const [selectedMiListing, setSelectedMiListing] = useState<ForeclosureListing | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null)
   const loadGen = useRef(0)
+
+  const syncTaxDeedsUrl = useCallback(
+    (next: TaxDeedsRegion) => {
+      const params = new URLSearchParams(searchParams.toString())
+      params.set('tab', 'live')
+      params.set('region', next)
+      router.replace(`/dashboard?${params.toString()}`, { scroll: false })
+    },
+    [router, searchParams]
+  )
+
+  useEffect(() => {
+    const urlRegion = parseRegionParam(searchParams.get('region'))
+    if (urlRegion) setRegion(urlRegion)
+  }, [searchParams])
+
+  const selectRegion = useCallback(
+    (next: TaxDeedsRegion) => {
+      setRegion(next)
+      syncTaxDeedsUrl(next)
+    },
+    [syncTaxDeedsUrl]
+  )
+
+  useEffect(() => {
+    setFilters(f => ({
+      ...f,
+      state: region === 'michigan' ? 'MI' : 'FL',
+      county: '',
+    }))
+    setSelectedFeed(null)
+    setSelectedMiListing(null)
+  }, [region])
 
   const loadAll = useCallback(async (refresh = false) => {
     const gen = ++loadGen.current
@@ -229,6 +301,26 @@ export default function LiveDataTab() {
       }
     }
 
+    async function loadMichiganTaxDeeds(): Promise<MichiganTaxDeedResponse & { ok: boolean }> {
+      setLoadingMiTaxDeeds(true)
+      try {
+        const res = await fetch(withRefreshParam('/api/michigan-foreclosures', refresh))
+        const data = (await res.json()) as MichiganTaxDeedResponse
+        if (!res.ok) throw new Error(data.error ?? 'Michigan tax deeds failed')
+        const taxDeedOnly = filterTaxDeedTabListings(data.listings ?? []).filter(row =>
+          MI_TAX_DEED_EXTRA_SOURCES.has(row.sourceLabel)
+        )
+        if (gen === loadGen.current) setMiTaxDeedListings(taxDeedOnly)
+        return { ...data, listings: taxDeedOnly, ok: true }
+      } catch (err) {
+        if (gen === loadGen.current) setMiTaxDeedListings([])
+        const message = err instanceof Error ? err.message : 'Michigan tax deeds failed'
+        return { ok: false, error: message, listings: [] }
+      } finally {
+        if (gen === loadGen.current) setLoadingMiTaxDeeds(false)
+      }
+    }
+
     async function loadGovEase(): Promise<GovEaseResponse & { ok: boolean }> {
       setLoadingGovEase(true)
       try {
@@ -264,6 +356,8 @@ export default function LiveDataTab() {
       setBid4assetsListings([])
       setSriListings([])
       setRealforecloseListings([])
+      setMiTaxDeedListings([])
+      setLoadingMiTaxDeeds(true)
       setCaseCount(0)
       setDetailsEnriched(0)
       setGovEaseSheetCount(0)
@@ -301,6 +395,7 @@ export default function LiveDataTab() {
         bid4assetsResult,
         sriResult,
         realforecloseResult,
+        miTaxDeedResult,
         propsResult,
       ] = await Promise.all([
         Promise.all(FL_REALTDM_COUNTIES.map(county => loadCounty(county))),
@@ -308,6 +403,7 @@ export default function LiveDataTab() {
         loadBid4Assets(),
         loadSri(),
         loadRealForeclose(),
+        loadMichiganTaxDeeds(),
         loadProperties(),
       ])
 
@@ -326,7 +422,11 @@ export default function LiveDataTab() {
       setBid4assetsCalendarCount(bid4assetsResult.calendarCount ?? 0)
       setBid4assetsSearchCount(bid4assetsResult.searchCount ?? 0)
       setSriListings(sriResult.listings ?? [])
-      setRealforecloseListings(realforecloseResult.listings ?? [])
+      setRealforecloseListings(
+        (realforecloseResult.listings ?? []).filter(
+          row => row.auctionType === REALFORECLOSE_SALE_TAXDEED
+        )
+      )
       setRealforecloseDatesWithAuctions(realforecloseResult.datesWithAuctions ?? 0)
       setRealforecloseCountyCounts(realforecloseResult.countyCounts ?? [])
 
@@ -354,6 +454,9 @@ export default function LiveDataTab() {
       }
       if (!realforecloseResult.ok) {
         warnings.push('RealForeclose listings unavailable')
+      }
+      if (!miTaxDeedResult.ok) {
+        warnings.push('Michigan tax-sale / Wayne listings unavailable')
       }
       if (!propsOk) {
         warnings.push(`Property data unavailable: ${propsErr}`)
@@ -383,6 +486,7 @@ export default function LiveDataTab() {
           ...countyResults.map(r => r.cachedAt),
           goveaseResult.cachedAt,
           realforecloseResult.cachedAt,
+          miTaxDeedResult.cachedAt,
         ]) ?? Date.now()
       )
     }
@@ -398,22 +502,59 @@ export default function LiveDataTab() {
   }, [loadAll])
 
   const feedItems = useMemo((): LiveDataFeedItem[] => {
+    const rfTaxDeed = realforecloseListings.filter(
+      row => row.auctionType === REALFORECLOSE_SALE_TAXDEED
+    )
     return [
       ...records.map(record => ({ kind: 'realtdm' as const, record })),
       ...goveaseListings.map(listing => ({ kind: 'govease' as const, listing })),
       ...bid4assetsListings.map(listing => ({ kind: 'bid4assets' as const, listing })),
       ...sriListings.map(listing => ({ kind: 'sri' as const, listing })),
-      ...realforecloseListings.map(listing => ({
+      ...rfTaxDeed.map(listing => ({
         kind: 'realforeclose' as const,
         listing,
       })),
     ]
   }, [records, goveaseListings, bid4assetsListings, sriListings, realforecloseListings])
 
-  const availableCounties = useMemo(
-    () => collectFeedCounties(feedItems, filters.state),
-    [feedItems, filters.state]
+  const flFeedItems = useMemo(
+    () => feedItems.filter(item => feedItemState(item) === 'FL'),
+    [feedItems]
   )
+  const miFeedItems = useMemo(
+    () => feedItems.filter(item => feedItemState(item) === 'MI'),
+    [feedItems]
+  )
+
+  const regionFilters = useMemo(
+    (): LiveDataFilterState => ({
+      ...filters,
+      state: region === 'michigan' ? 'MI' : 'FL',
+    }),
+    [filters, region]
+  )
+
+  const activeFeedItems = region === 'florida' ? flFeedItems : miFeedItems
+
+  const filteredMiTaxDeeds = useMemo(
+    () =>
+      region === 'michigan'
+        ? filterAndSortForeclosureListings(miTaxDeedListings, regionFilters, q)
+        : [],
+    [miTaxDeedListings, regionFilters, q, region]
+  )
+
+  const availableCounties = useMemo(() => {
+    const fromFeed = collectFeedCounties(
+      activeFeedItems,
+      region === 'michigan' ? 'MI' : 'FL'
+    )
+    if (region === 'michigan') {
+      const fromMiCards = collectForeclosureCounties(miTaxDeedListings)
+      return [...new Set([...fromFeed, ...fromMiCards])].sort((a, b) => a.localeCompare(b))
+    }
+    return fromFeed
+  }, [activeFeedItems, miTaxDeedListings, region])
 
   useEffect(() => {
     if (filters.county && !availableCounties.includes(filters.county)) {
@@ -433,20 +574,25 @@ export default function LiveDataTab() {
       .map(c => `${c.county} ${c.count}`)
       .join(' · ')
   }, [realforecloseCountyCounts])
-  const totalDisplayed = feedItems.length
+  const flDisplayedCount = flFeedItems.length
+  const miDisplayedCount = miFeedItems.length + miTaxDeedListings.length
+  const totalDisplayed = region === 'florida' ? flDisplayedCount : miDisplayedCount
 
   const filtered = useMemo(
-    () => filterAndSortFeedItems(feedItems, filters, q),
-    [feedItems, filters, q]
+    () => filterAndSortFeedItems(activeFeedItems, regionFilters, q),
+    [activeFeedItems, regionFilters, q]
   )
 
-  const progressTotal = FL_REALTDM_COUNTY_COUNT + 4
+  const regionDisplayedCount = filtered.length + filteredMiTaxDeeds.length
+
+  const progressTotal = FL_REALTDM_COUNTY_COUNT + 5
   const progressLoaded =
     loadedCountyCount +
     (loadingGovEase ? 0 : 1) +
     (loadingBid4Assets ? 0 : 1) +
     (loadingSri ? 0 : 1) +
-    (loadingRealForeclose ? 0 : 1)
+    (loadingRealForeclose ? 0 : 1) +
+    (loadingMiTaxDeeds ? 0 : 1)
 
   return (
     <div className="px-4 sm:px-6 py-6 max-w-6xl mx-auto">
@@ -459,23 +605,37 @@ export default function LiveDataTab() {
       {selectedFeed && selectedFeed.kind !== 'realtdm' && (
         <LiveFeedPropertyModal item={selectedFeed} onClose={() => setSelectedFeed(null)} />
       )}
+      {selectedMiListing && region === 'michigan' && (
+        <ForeclosurePropertyModal
+          listing={selectedMiListing}
+          onClose={() => setSelectedMiListing(null)}
+        />
+      )}
       <div className="mb-6">
         <p className="font-mono text-xs tracking-widest" style={{ color: 'var(--gold)' }}>
-          FLORIDA · MICHIGAN · REALTDM + GOVEASE + BID4ASSETS + SRI + REALFORECLOSE
+          {region === 'florida'
+            ? 'FLORIDA · REALTDM + GOVEASE + REALFORECLOSE'
+            : 'MICHIGAN · BID4ASSETS + SRI + TAX-SALE.INFO + WAYNE'}
         </p>
         <h2 className="font-display text-3xl tracking-wide mt-1" style={{ color: 'var(--text)' }}>
           LIVE TAX DEED CASES
         </h2>
         <p className="font-mono text-xs mt-2 max-w-2xl" style={{ color: 'var(--muted)' }}>
-          Upcoming resale auctions (30-day and full advertisement) from Florida RealTDM counties,
-          GovEase schedule and live parcels (10 FL counties), Bid4Assets tax sales (10 MI counties),
-          SRI tax deed auctions (10 MI counties), and Florida RealForeclose waiting auctions (25
-          counties).
-          Miami-Dade parcels merge with county GIS when
-          the parcel number matches. Only
-          cases with a sale date today or later are shown.
-          {propertySource === 'fallback' &&
-            ' (Miami-Dade ArcGIS using county backup endpoint.)'}
+          {region === 'florida' ? (
+            <>
+              Upcoming tax deed resale auctions from Florida RealTDM counties, GovEase schedule and
+              live parcels, and RealForeclose waiting tax deed sales (25 counties). Miami-Dade
+              parcels merge with county GIS when the parcel number matches. Only cases with a sale
+              date today or later are shown.
+              {propertySource === 'fallback' &&
+                ' (Miami-Dade ArcGIS using county backup endpoint.)'}
+            </>
+          ) : (
+            <>
+              Michigan tax forfeiture and tax deed auctions from Bid4Assets, SRI, tax-sale.info
+              (Title Check), and Wayne County — 20 target counties. Only upcoming sales are shown.
+            </>
+          )}
         </p>
       </div>
 
@@ -484,6 +644,35 @@ export default function LiveDataTab() {
         loading={loading}
         onRefresh={() => loadAll(true)}
       />
+
+      <div
+        className="flex gap-1 mb-4 border-b overflow-x-auto"
+        style={{ borderColor: 'var(--border)' }}
+      >
+        {REGION_TABS.map(tab => {
+          const active = region === tab.id
+          const count = tab.id === 'florida' ? flDisplayedCount : miDisplayedCount
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => selectRegion(tab.id)}
+              className="font-mono text-xs tracking-widest px-4 py-2 transition-all whitespace-nowrap"
+              style={{
+                color: active ? 'var(--gold)' : 'var(--muted)',
+                borderBottom: active ? '2px solid var(--gold)' : '2px solid transparent',
+                background: 'transparent',
+                cursor: 'pointer',
+              }}
+            >
+              {tab.label.toUpperCase()}
+              {!loading && count > 0 && (
+                <span className="ml-2 opacity-80">({count})</span>
+              )}
+            </button>
+          )
+        })}
+      </div>
 
       <div
         className={`flex gap-2 mb-6${loading ? ' opacity-50 pointer-events-none' : ''}`}
@@ -516,11 +705,17 @@ export default function LiveDataTab() {
       </div>
 
       <LiveDataFilters
-        filters={filters}
+        filters={regionFilters}
         counties={availableCounties}
         disabled={loading}
+        hideStateFilter
         onChange={setFilters}
-        onReset={() => setFilters(defaultLiveDataFilters)}
+        onReset={() =>
+          setFilters({
+            ...defaultLiveDataFilters,
+            state: region === 'michigan' ? 'MI' : 'FL',
+          })
+        }
       />
 
       {loading && (
@@ -528,12 +723,19 @@ export default function LiveDataTab() {
           loadedCount={progressLoaded}
           totalCount={progressTotal}
           loadingParcels={loadingParcels}
-          loadingSourceNames={[
-            ...(loadingGovEase ? ['GovEase'] : []),
-            ...(loadingBid4Assets ? ['Bid4Assets'] : []),
-            ...(loadingSri ? ['SRI'] : []),
-            ...(loadingRealForeclose ? ['RealForeclose'] : []),
-          ]}
+          loadingSourceNames={
+            region === 'florida'
+              ? [
+                  ...(loadingParcels ? ['RealTDM'] : []),
+                  ...(loadingGovEase ? ['GovEase'] : []),
+                  ...(loadingRealForeclose ? ['RealForeclose'] : []),
+                ]
+              : [
+                  ...(loadingBid4Assets ? ['Bid4Assets'] : []),
+                  ...(loadingSri ? ['SRI'] : []),
+                  ...(loadingMiTaxDeeds ? ['tax-sale.info'] : []),
+                ]
+          }
         />
       )}
 
@@ -546,101 +748,124 @@ export default function LiveDataTab() {
         </div>
       )}
 
-      {!loading && (caseCount > 0 || totalDisplayed > 0 || !error) && (
+      {!loading && (totalDisplayed > 0 || !error) && (
         <>
-          {error && totalDisplayed > 0 && (
+          {error && regionDisplayedCount > 0 && (
             <p className="font-mono text-xs mb-3" style={{ color: '#e87a5a' }}>{error}</p>
           )}
-          <p
-            className="font-mono text-xs mb-3 px-3 py-2 rounded"
-            style={{
-              color: 'var(--muted)',
-              background: 'var(--panel)',
-              border: '1px solid var(--border)',
-            }}
-          >
-            <span style={{ color: 'var(--gold)' }}>{upcomingCount}</span> RealTDM upcoming
-            {upcomingCount !== 1 ? '' : ''} ·{' '}
-            <span style={{ color: 'var(--gold)' }}>{goveaseCount}</span> GovEase listing
-            {goveaseCount !== 1 ? 's' : ''}
-            {goveaseCount > 0 && (
-              <>
-                {' '}
-                ({goveaseLiveCount} live parcel{goveaseLiveCount !== 1 ? 's' : ''}
-                {goveaseSheetCount > 0 ? ` · ${goveaseSheetCount} scheduled` : ''})
-              </>
-            )}
-            {' · '}
-            <span style={{ color: 'var(--gold)' }}>{bid4assetsCount}</span> Bid4Assets listing
-            {bid4assetsCount !== 1 ? 's' : ''}
-            {bid4assetsCount > 0 && (
-              <>
-                {' '}
-                ({bid4assetsSearchCount} search
-                {bid4assetsCalendarCount > 0
-                  ? ` · ${bid4assetsCalendarCount} calendar`
-                  : ''}
-                )
-              </>
-            )}
-            {' · '}
-            <span style={{ color: 'var(--gold)' }}>{sriCount}</span> SRI listing
-            {sriCount !== 1 ? 's' : ''}
-            {' · '}
-            <span style={{ color: 'var(--gold)' }}>{realforecloseCount}</span> RealForeclose
-            listing{realforecloseCount !== 1 ? 's' : ''}
-            {realforecloseCount > 0 && realforecloseDatesWithAuctions > 0 && (
-              <>
-                {' '}
-                ({realforecloseDatesWithAuctions} auction day
-                {realforecloseDatesWithAuctions !== 1 ? 's' : ''})
-              </>
-            )}
-          </p>
-          {realforecloseCountySummary && (
+          {region === 'florida' && (
+            <>
+              <p
+                className="font-mono text-xs mb-3 px-3 py-2 rounded"
+                style={{
+                  color: 'var(--muted)',
+                  background: 'var(--panel)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <span style={{ color: 'var(--gold)' }}>{upcomingCount}</span> RealTDM upcoming
+                {' · '}
+                <span style={{ color: 'var(--gold)' }}>{goveaseCount}</span> GovEase listing
+                {goveaseCount !== 1 ? 's' : ''}
+                {goveaseCount > 0 && (
+                  <>
+                    {' '}
+                    ({goveaseLiveCount} live parcel{goveaseLiveCount !== 1 ? 's' : ''}
+                    {goveaseSheetCount > 0 ? ` · ${goveaseSheetCount} scheduled` : ''})
+                  </>
+                )}
+                {' · '}
+                <span style={{ color: 'var(--gold)' }}>{realforecloseCount}</span> RealForeclose
+                listing{realforecloseCount !== 1 ? 's' : ''}
+                {realforecloseCount > 0 && realforecloseDatesWithAuctions > 0 && (
+                  <>
+                    {' '}
+                    ({realforecloseDatesWithAuctions} auction day
+                    {realforecloseDatesWithAuctions !== 1 ? 's' : ''})
+                  </>
+                )}
+              </p>
+              {realforecloseCountySummary && (
+                <p
+                  className="font-mono text-[10px] mb-3 px-3 leading-relaxed"
+                  style={{ color: 'var(--muted)' }}
+                >
+                  <span style={{ color: 'var(--gold)' }}>RealForeclose by county:</span>{' '}
+                  {realforecloseCountySummary}
+                </p>
+              )}
+              <p
+                className="font-mono text-xs mb-3 px-3 py-2 rounded"
+                style={{
+                  color: 'var(--muted)',
+                  background: 'var(--panel)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <span style={{ color: 'var(--text)' }}>{caseCount}</span> total RealTDM cases found
+                {caseCount > upcomingCount && (
+                  <>
+                    {' '}
+                    ({caseCount - upcomingCount} past sale
+                    {caseCount - upcomingCount !== 1 ? 's' : ''} hidden)
+                  </>
+                )}
+              </p>
+            </>
+          )}
+          {region === 'michigan' && (
             <p
-              className="font-mono text-[10px] mb-3 px-3 leading-relaxed"
-              style={{ color: 'var(--muted)' }}
+              className="font-mono text-xs mb-3 px-3 py-2 rounded"
+              style={{
+                color: 'var(--muted)',
+                background: 'var(--panel)',
+                border: '1px solid var(--border)',
+              }}
             >
-              <span style={{ color: 'var(--gold)' }}>RealForeclose by county:</span>{' '}
-              {realforecloseCountySummary}
+              <span style={{ color: 'var(--gold)' }}>{bid4assetsCount}</span> Bid4Assets
+              {' · '}
+              <span style={{ color: 'var(--gold)' }}>{sriCount}</span> SRI
+              {' · '}
+              <span style={{ color: 'var(--gold)' }}>{miTaxDeedListings.length}</span> tax-sale /
+              Wayne
             </p>
           )}
-          <p
-            className="font-mono text-xs mb-3 px-3 py-2 rounded"
-            style={{
-              color: 'var(--muted)',
-              background: 'var(--panel)',
-              border: '1px solid var(--border)',
-            }}
-          >
-            <span style={{ color: 'var(--text)' }}>{caseCount}</span> total RealTDM cases found
-            {caseCount > upcomingCount && (
-              <> ({caseCount - upcomingCount} past sale{caseCount - upcomingCount !== 1 ? 's' : ''} hidden)</>
-            )}
-          </p>
           <p className="font-mono text-xs mb-4" style={{ color: 'var(--muted)' }}>
-            {q
-              ? `${filtered.length} match${filtered.length !== 1 ? 'es' : ''} · `
-              : ''}
-            {filtered.length} of {totalDisplayed} displayed
-            {upcomingCount > 0 && ` · BIDS/ADDRS: ${detailsEnriched} of ${upcomingCount}`}
-            {propertySource != null && ` · PARCELS: ${propertySource.toUpperCase()}`}
+            {q ? `${regionDisplayedCount} match${regionDisplayedCount !== 1 ? 'es' : ''} · ` : ''}
+            {regionDisplayedCount} of {totalDisplayed} displayed
+            {region === 'florida' && upcomingCount > 0 &&
+              ` · BIDS/ADDRS: ${detailsEnriched} of ${upcomingCount}`}
+            {region === 'florida' && propertySource != null &&
+              ` · PARCELS: ${propertySource.toUpperCase()}`}
           </p>
 
-          {filtered.length === 0 ? (
+          {regionDisplayedCount === 0 ? (
             <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
               <p className="font-display text-3xl">
                 {totalDisplayed === 0 ? 'NO UPCOMING SALES' : 'NO MATCHES'}
               </p>
-              {totalDisplayed === 0 && caseCount > 0 && (
+              {region === 'florida' && totalDisplayed === 0 && caseCount > 0 && (
                 <p className="font-mono text-xs mt-2">
                   All {caseCount} RealTDM cases have sale dates in the past.
+                </p>
+              )}
+              {region === 'michigan' && totalDisplayed === 0 && (
+                <p className="font-mono text-xs mt-2 max-w-md mx-auto">
+                  No Michigan tax deed listings loaded. Try refresh or check back closer to the
+                  county sale date.
                 </p>
               )}
             </div>
           ) : (
             <div className="space-y-3">
+              {region === 'michigan' &&
+                filteredMiTaxDeeds.map(listing => (
+                  <ForeclosureListingCard
+                    key={listing.id}
+                    listing={listing}
+                    onSelect={() => setSelectedMiListing(listing)}
+                  />
+                ))}
               {filtered.map(item =>
                 item.kind === 'realtdm' ? (
                   <RealTdmCard
@@ -1113,18 +1338,16 @@ function RealForecloseCard({
               {listing.county.toUpperCase()} · FL · REALFORECLOSE
             </p>
             {isGoodDeal && <GoodDealBadge />}
-            {listing.auctionType && listing.auctionType !== '—' && (
-              <span
-                className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
-                style={{
-                  background: 'rgba(90,159,232,0.12)',
-                  color: '#5a9fe8',
-                  border: '1px solid rgba(90,159,232,0.25)',
-                }}
-              >
-                {listing.auctionType}
-              </span>
-            )}
+            <span
+              className="font-mono text-[10px] px-2 py-0.5 rounded-sm"
+              style={{
+                background: 'rgba(90,159,232,0.12)',
+                color: '#5a9fe8',
+                border: '1px solid rgba(90,159,232,0.25)',
+              }}
+            >
+              {listing.auctionType}
+            </span>
           </div>
           <p className="text-sm font-medium leading-snug" style={{ color: 'var(--text)' }}>
             {listing.address}
@@ -1299,5 +1522,23 @@ function GovEaseCard({
         </div>
       </div>
     </FeedCardShell>
+  )
+}
+
+function LiveDataTabFallback() {
+  return (
+    <div className="px-4 sm:px-6 py-6 max-w-6xl mx-auto">
+      <p className="font-mono text-xs text-center py-16" style={{ color: 'var(--muted)' }}>
+        Loading tax deeds…
+      </p>
+    </div>
+  )
+}
+
+export default function LiveDataTab() {
+  return (
+    <Suspense fallback={<LiveDataTabFallback />}>
+      <LiveDataTabContent />
+    </Suspense>
   )
 }

@@ -1,4 +1,9 @@
-import type { ForeclosureListing } from '@/lib/foreclosure-listing'
+import {
+  isForeclosureListing,
+  isTaxDeedListing,
+  listingTypeLabel,
+  type ForeclosureListing,
+} from '@/lib/foreclosure-listing'
 import type { RealForecloseListing } from '@/lib/realforeclose'
 
 export type {
@@ -111,10 +116,25 @@ function matchesSearch(listing: ForeclosureListing, q: string): boolean {
     listing.caseNumber.toLowerCase().includes(lq) ||
     listing.parcelId.toLowerCase().includes(lq) ||
     listing.address.toLowerCase().includes(lq) ||
+    (listingTypeLabel(listing)?.toLowerCase().includes(lq) ?? false) ||
     (listing.auctionType?.toLowerCase().includes(lq) ?? false) ||
     listing.eventDateDisplay.toLowerCase().includes(lq) ||
     listing.sourceLabel.toLowerCase().includes(lq)
   )
+}
+
+/** Foreclosures tab: mortgage / lis pendens / pre-foreclosure only. */
+export function filterForeclosureTabListings(
+  listings: ForeclosureListing[]
+): ForeclosureListing[] {
+  return listings.filter(isForeclosureListing)
+}
+
+/** Tax Deeds tab: Michigan tax-sale / Wayne / other TAXDEED rows from foreclosure-shaped APIs. */
+export function filterTaxDeedTabListings(
+  listings: ForeclosureListing[]
+): ForeclosureListing[] {
+  return listings.filter(isTaxDeedListing)
 }
 
 export function filterAndSortForeclosureListings(

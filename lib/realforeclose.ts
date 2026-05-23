@@ -57,6 +57,13 @@ export type RealForecloseCounty = (typeof FL_REALFORECLOSE_COUNTIES)[number]
 
 export const FL_REALFORECLOSE_COUNTY_COUNT = FL_REALFORECLOSE_COUNTIES.length
 
+export const REALFORECLOSE_SALE_TAXDEED = 'TAXDEED' as const
+export const REALFORECLOSE_SALE_FORECLOSURE = 'FORECLOSURE' as const
+
+export type RealForecloseSaleKind =
+  | typeof REALFORECLOSE_SALE_TAXDEED
+  | typeof REALFORECLOSE_SALE_FORECLOSURE
+
 export type RealForecloseListing = {
   id: string
   county: string
@@ -70,7 +77,7 @@ export type RealForecloseListing = {
   auctionDate: string
   auctionTime: string
   auctionDateTime: string
-  auctionType: string
+  auctionType: RealForecloseSaleKind
   certificateNumber: string | null
   auctionId: string
   auctionUrl: string
@@ -203,14 +210,16 @@ function normalizeAuctionType(raw: string): string {
   return raw.replace(/\s+/g, '').toUpperCase()
 }
 
-/** Only tax deed sales — excludes FORECLOSURE, mortgage, and other types. */
+/** Raw "Auction Type" from county page matches tax deed sales. */
 export function isTaxDeedAuctionType(auctionType: string): boolean {
-  return normalizeAuctionType(auctionType) === 'TAXDEED'
+  const norm = normalizeAuctionType(auctionType)
+  return norm === 'TAXDEED' || norm.includes('TAXDEED')
 }
 
-/** Mortgage / certificate foreclosure auctions on RealForeclose. */
+/** Raw "Auction Type" from county page matches mortgage/certificate foreclosure sales. */
 export function isForeclosureAuctionType(auctionType: string): boolean {
-  return normalizeAuctionType(auctionType) === 'FORECLOSURE'
+  const norm = normalizeAuctionType(auctionType)
+  return norm === 'FORECLOSURE' || norm.includes('FORECLOSURE')
 }
 
 export type RealForecloseAuctionKind = 'taxdeed' | 'foreclosure' | 'all'
@@ -226,18 +235,26 @@ function matchesAuctionKind(auctionType: string, kind: RealForecloseAuctionKind)
     : isForeclosureAuctionType(auctionType)
 }
 
+/** Map county page fields to TAXDEED or FORECLOSURE (never ambiguous labels). */
 function resolveStoredAuctionType(
-  auctionType: string,
-  fields: Record<string, string>
-): string {
-  const norm = normalizeAuctionType(auctionType)
-  if (norm === 'TAXDEED' || norm.includes('TAXDEED')) return 'TAXDEED'
-  if (norm === 'FORECLOSURE' || norm.includes('FORECLOSURE')) return 'FORECLOSURE'
-  if (fields['Certificate #']?.trim() || fields['Opening Bid']?.trim()) return 'TAXDEED'
-  if (fields['Final Judgment Amount']?.trim() || fields['Plaintiff Max Bid']?.trim()) {
-    return 'FORECLOSURE'
+  auctionTypeRaw: string,
+  fields: Record<string, string>,
+  kind: RealForecloseAuctionKind
+): RealForecloseSaleKind | null {
+  const raw = auctionTypeRaw.trim()
+  if (raw) {
+    if (isTaxDeedAuctionType(raw)) return REALFORECLOSE_SALE_TAXDEED
+    if (isForeclosureAuctionType(raw)) return REALFORECLOSE_SALE_FORECLOSURE
   }
-  return auctionType.trim() || '—'
+  if (fields['Certificate #']?.trim() || fields['Opening Bid']?.trim()) {
+    return REALFORECLOSE_SALE_TAXDEED
+  }
+  if (fields['Final Judgment Amount']?.trim() || fields['Plaintiff Max Bid']?.trim()) {
+    return REALFORECLOSE_SALE_FORECLOSURE
+  }
+  if (kind === 'taxdeed') return REALFORECLOSE_SALE_TAXDEED
+  if (kind === 'foreclosure') return REALFORECLOSE_SALE_FORECLOSURE
+  return null
 }
 
 function mmDdYyyyFromIso(iso: string): string {
@@ -350,7 +367,8 @@ function parseAuctionBlocks(
     if (!caseNumber && !parcelId) continue
 
     const caseSlug = caseNumber.replace(/\s+/g, '') || parcelId || auctionId
-    const storedType = resolveStoredAuctionType(auctionType, fields)
+    const storedType = resolveStoredAuctionType(auctionType, fields, kind)
+    if (!storedType) continue
 
     listings.push({
       id: `rf-${county.key}-${auctionId}-${caseSlug}`,
@@ -699,6 +717,7 @@ async function fetchFloridaRealForecloseByKind(kind: RealForecloseAuctionKind): 
 }
 
 /** Fetch all upcoming waiting auctions from 25 RealForeclose county sites (90-day preview scan). */
+/** Tax deed waiting auctions only (excludes mortgage foreclosure sales). */
 export async function fetchFloridaRealForecloseListings(): Promise<{
   listings: RealForecloseListing[]
   datesScanned: number
@@ -707,7 +726,7 @@ export async function fetchFloridaRealForecloseListings(): Promise<{
   countiesScanned: number
   countiesWithListings: number
 }> {
-  return fetchFloridaRealForecloseByKind('all')
+  return fetchFloridaRealForecloseByKind('taxdeed')
 }
 
 /** Fetch upcoming Florida foreclosure auctions from all RealForeclose county sites. */

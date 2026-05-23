@@ -1,4 +1,4 @@
-import type { ForeclosureListing } from '@/lib/foreclosure-listing'
+import { SALE_KIND_FORECLOSURE, type ForeclosureListing } from '@/lib/foreclosure-listing'
 import type { RealForecloseListing } from '@/lib/realforeclose'
 import { searchMiamiDadeClerkRecords } from '@/lib/miami-dade-clerk-records'
 
@@ -28,7 +28,8 @@ function realForecloseToPreForeclosure(row: RealForecloseListing): ForeclosureLi
     estimatedValue: row.assessedValue,
     eventDate: row.auctionDate,
     eventDateDisplay: `${row.auctionDateTime} (${daysOut} days out)`,
-    auctionType: row.auctionType,
+    auctionType: SALE_KIND_FORECLOSURE,
+    auctionSubtype: row.auctionType,
     sourceUrl: row.auctionUrl,
     sourceLabel: 'RealForeclose (scheduled auction)',
   }
