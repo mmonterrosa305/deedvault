@@ -857,7 +857,9 @@ function LiveDataTabContent() {
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <>
+              {/* DO NOT CHANGE TO GRID - Cards must always be full-width horizontal */}
+              <div className="space-y-3">
               {region === 'michigan' &&
                 filteredMiTaxDeeds.map(listing => (
                   <ForeclosureListingCard
@@ -899,7 +901,8 @@ function LiveDataTabContent() {
                   />
                 )
               )}
-            </div>
+              </div>
+            </>
           )}
         </>
       )}
@@ -938,7 +941,7 @@ function FeedCardShell({
           onSelect()
         }
       }}
-      className="rounded-md p-4 transition-all cursor-pointer h-full min-w-0"
+      className="rounded-md p-4 transition-all cursor-pointer"
       style={feedCardStyle(isGoodDeal)}
       onMouseEnter={e => (e.currentTarget.style.borderColor = feedCardHoverBorder(isGoodDeal))}
       onMouseLeave={e =>
